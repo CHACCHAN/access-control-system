@@ -9,27 +9,23 @@ interface CameraViewProps {
 
 export function CameraView({ videoRef, status, error }: CameraViewProps) {
   return (
-    <div style={{ position: "relative", width: "640px", height: "480px" }}>
+    <div className="absolute inset-0 overflow-hidden rounded-3xl bg-slate-950">
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "640px",
-          height: "480px",
-          backgroundColor: "#000",
-          transform: "scaleX(-1)", // 鏡像表示(セルフィー慣れした見た目にする)
-        }}
+        className="h-full w-full -scale-x-100 object-cover"
       />
       {status === "requesting" && (
-        <p>カメラへのアクセスを許可してください...</p>
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 text-sm text-slate-300">
+          <p className="animate-pulse">カメラへのアクセスを許可してください...</p>
+        </div>
       )}
       {status === "error" && (
-        <p style={{ color: "red" }}>カメラの起動に失敗しました: {error}</p>
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/90 px-6 text-center text-sm text-rose-400">
+          <p>カメラの起動に失敗しました: {error}</p>
+        </div>
       )}
     </div>
   );

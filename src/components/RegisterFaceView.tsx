@@ -1,0 +1,152 @@
+import { useState, type RefObject } from "react";
+import * as faceapi from "@vladmandic/face-api";
+import type { Member } from "../api/members";
+import { registerFace } from "../api/faceRegistration";
+import { CheckIcon, CloseIcon, ScanFaceIcon } from "./icons";
+
+interface RegisterFaceViewProps {
+  videoRef: RefObject<HTMLVideoElement | null>;
+  members: Member[];
+  faceApiReady: boolean;
+  onRegistered: (username: string, descriptor: Float32Array) => void;
+  onClose: () => void;
+}
+
+type CaptureState = "idle" | "capturing" | "success" | "error";
+
+export function RegisterFaceView({
+  videoRef,
+  members,
+  faceApiReady,
+  onRegistered,
+  onClose,
+}: RegisterFaceViewProps) {
+  const [selectedUsername, setSelectedUsername] = useState(members[0]?.username ?? "");
+  const [search, setSearch] = useState("");
+  const [captureState, setCaptureState] = useState<CaptureState>("idle");
+  const [message, setMessage] = useState<string | null>(null);
+
+  const filteredMembers = members.filter((m) => {
+    const query = search.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      m.name.toLowerCase().includes(query) || m.username.toLowerCase().includes(query)
+    );
+  });
+
+  async function handleCapture() {
+    if (!selectedUsername) {
+      setMessage("登録するメンバーを選択してください");
+      return;
+    }
+    const video = videoRef.current;
+    if (!video || !faceApiReady) return;
+
+    setCaptureState("capturing");
+    setMessage(null);
+
+    try {
+      const detection = await faceapi
+        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!detection) {
+        setCaptureState("error");
+        setMessage("顔が検出できませんでした。カメラに正面を向けてください");
+        return;
+      }
+
+      await registerFace(selectedUsername, detection.descriptor);
+      onRegistered(selectedUsername, detection.descriptor);
+      setCaptureState("success");
+      setMessage("顔情報を登録しました");
+    } catch (err) {
+      setCaptureState("error");
+      setMessage(`登録に失敗しました: ${String(err)}`);
+    }
+  }
+
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col justify-end bg-linear-to-t from-slate-950/95 via-slate-950/60 to-transparent p-6 animate-fade-in">
+      <button
+        onClick={onClose}
+        className="absolute right-4 top-4 rounded-full bg-slate-900/70 p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white"
+        aria-label="閉じる"
+      >
+        <CloseIcon className="h-5 w-5" />
+      </button>
+
+      <div className="animate-slide-up rounded-3xl border border-white/10 bg-slate-900/90 p-6 shadow-2xl backdrop-blur">
+        <div className="flex items-center gap-2 text-slate-200">
+          <ScanFaceIcon className="h-5 w-5 text-sky-400" />
+          <h3 className="text-base font-semibold">新しい顔を登録する</h3>
+        </div>
+
+        <label className="mt-4 block text-xs font-medium text-slate-400">
+          登録するメンバー
+        </label>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="名前・ユーザー名で検索"
+          className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-800 px-3 py-2.5 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-sky-400"
+        />
+
+        <div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-white/10 bg-slate-800/60">
+          {filteredMembers.length === 0 && (
+            <p className="px-3 py-3 text-xs text-slate-500">
+              該当するメンバーが見つかりません
+            </p>
+          )}
+          {filteredMembers.map((m) => (
+            <button
+              key={m.username}
+              type="button"
+              onClick={() => setSelectedUsername(m.username)}
+              className={`flex w-full items-center justify-between px-3 py-2.5 text-left text-sm transition ${
+                m.username === selectedUsername
+                  ? "bg-sky-500/15 text-sky-300"
+                  : "text-slate-200 hover:bg-white/5"
+              }`}
+            >
+              <span>{m.name}</span>
+              <span className="text-xs text-slate-500">@{m.username}</span>
+            </button>
+          ))}
+        </div>
+
+        <button
+          onClick={handleCapture}
+          disabled={!faceApiReady || captureState === "capturing"}
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-sky-500 py-3 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {captureState === "capturing" ? (
+            <>
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              解析中...
+            </>
+          ) : captureState === "success" ? (
+            <>
+              <CheckIcon className="h-4 w-4" />
+              登録完了
+            </>
+          ) : (
+            "この顔を登録する"
+          )}
+        </button>
+
+        {message && (
+          <p
+            className={`mt-3 text-xs ${
+              captureState === "error" ? "text-rose-400" : "text-emerald-400"
+            }`}
+          >
+            {message}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
