@@ -1,49 +1,37 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
+import { CameraView } from "./components/CameraView";
+import { FaceDetectorTest } from "./components/FaceDetectorTest";
+import { useCamera } from "./hooks/useCamera";
+import { useOpenCv } from "./hooks/useOpenCV";
+import { useFaceDetector } from "./hooks/useFaceDetector";
 import "./App.css";
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
-
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  const { videoRef, status: cameraStatus, error: cameraError } = useCamera();
+  const { cv, status: cvStatus, error: cvError } = useOpenCv();
+  const {
+    detector,
+    status: detectorStatus,
+    error: detectorError,
+  } = useFaceDetector(cv);
 
   return (
     <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+      <h1>在室管理システム - カメラ動作確認</h1>
+      <p>OpenCV.js status: {cvStatus}</p>
+      {cvError && <p style={{ color: "red" }}>{cvError}</p>}
+      <p>FaceDetector status: {detectorStatus}</p>
+      {detectorError && <p style={{ color: "red" }}>{detectorError}</p>}
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
+      <div style={{ position: "relative", width: "640px", height: "480px" }}>
+        <CameraView
+          videoRef={videoRef}
+          status={cameraStatus}
+          error={cameraError}
         />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+        {cv && detector && (
+          <FaceDetectorTest cv={cv} detector={detector} videoRef={videoRef} />
+        )}
+      </div>
     </main>
   );
 }
