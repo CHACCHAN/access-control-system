@@ -1,8 +1,8 @@
-import { useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import * as faceapi from "@vladmandic/face-api";
 import type { Member } from "../../entities/member/api";
 import { registerFace } from "./api";
-import { CheckIcon, CloseIcon, ScanFaceIcon } from "../../shared/ui/icons";
+import { ArrowUpIcon, CheckIcon, CloseIcon, ScanFaceIcon } from "../../shared/ui/icons";
 
 interface FaceRegistrationOverlayProps {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -13,6 +13,9 @@ interface FaceRegistrationOverlayProps {
 }
 
 type CaptureState = "idle" | "capturing" | "success" | "error";
+
+// 操作されないまま放置された場合に、自動的に認証モードへ戻すまでの時間
+const IDLE_TIMEOUT_MS = 60_000;
 
 export function FaceRegistrationOverlay({
   videoRef,
@@ -25,6 +28,15 @@ export function FaceRegistrationOverlay({
   const [search, setSearch] = useState("");
   const [captureState, setCaptureState] = useState<CaptureState>("idle");
   const [message, setMessage] = useState<string | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      onCloseRef.current();
+    }, IDLE_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [search, selectedUsername, captureState]);
 
   const filteredMembers = members.filter((m) => {
     const query = search.trim().toLowerCase();
@@ -77,6 +89,17 @@ export function FaceRegistrationOverlay({
       >
         <CloseIcon className="h-5 w-5" />
       </button>
+
+      {captureState !== "success" && (
+        <div className="pointer-events-none fixed inset-x-0 top-8 z-50 flex justify-center animate-fade-in">
+          <div className="flex flex-col items-center gap-3">
+            <ArrowUpIcon className="h-14 w-14 animate-bounce text-sky-500 dark:text-sky-400" />
+            <p className="rounded-full bg-white/90 px-6 py-2.5 text-lg font-semibold text-slate-700 shadow-lg backdrop-blur dark:bg-slate-950/80 dark:text-slate-200">
+              カメラを見てください
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="animate-slide-up rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-2xl backdrop-blur dark:border-white/10 dark:bg-slate-900/90">
         <div className="flex items-center gap-2 text-slate-900 dark:text-slate-200">
