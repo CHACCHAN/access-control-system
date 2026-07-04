@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { restartComputer, shutdownComputer } from "./api";
-import { CloseIcon, PowerIcon, RestartIcon } from "../../shared/ui/icons";
+import { ChevronRightIcon, CloseIcon, PowerIcon, RestartIcon } from "../../shared/ui/icons";
 
 type PendingAction = "shutdown" | "restart" | null;
 
@@ -11,19 +11,23 @@ const ACTION_LABEL: Record<Exclude<PendingAction, null>, string> = {
 };
 
 export function SystemControlPanel() {
+  const [isExpanded, setIsExpanded] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [isExecuting, setIsExecuting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Tauri アプリとして動いていない(ブラウザ単体での開発時など)は表示しない
-  if (!isTauri()) return null;
 
   async function handleConfirm() {
     if (!pendingAction) return;
     setIsExecuting(true);
     setError(null);
     try {
-      await (pendingAction === "shutdown" ? shutdownComputer() : restartComputer());
+      // Tauri アプリとして動いていない(ブラウザでの開発時など)は実行せず、見た目だけ確認できればよい
+      if (isTauri()) {
+        await (pendingAction === "shutdown" ? shutdownComputer() : restartComputer());
+      }
+      setIsExecuting(false);
+      setPendingAction(null);
+      setIsExpanded(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setIsExecuting(false);
@@ -38,21 +42,44 @@ export function SystemControlPanel() {
 
   return (
     <>
-      <div className="fixed bottom-4 left-4 z-40 flex gap-2">
+      <div className="fixed bottom-4 left-4 z-40 flex items-center">
         <button
-          onClick={() => setPendingAction("restart")}
-          className="flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-100 dark:border-white/10 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700"
+          onClick={() => setIsExpanded((prev) => !prev)}
+          aria-label="電源メニューを開く"
+          aria-expanded={isExpanded}
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition ${
+            isExpanded
+              ? "border-slate-300 bg-slate-100 text-slate-700 dark:border-white/20 dark:bg-slate-700 dark:text-white"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700"
+          }`}
         >
-          <RestartIcon className="h-4 w-4" />
-          再起動
+          {isExpanded ? (
+            <CloseIcon className="h-4.5 w-4.5" />
+          ) : (
+            <ChevronRightIcon className="h-4.5 w-4.5" />
+          )}
         </button>
-        <button
-          onClick={() => setPendingAction("shutdown")}
-          className="flex h-9 items-center gap-1.5 rounded-full border border-rose-200 bg-white px-3.5 text-xs font-medium text-rose-600 shadow-sm transition hover:bg-rose-50 dark:border-rose-500/20 dark:bg-slate-800/80 dark:text-rose-400 dark:hover:bg-rose-500/10"
+
+        <div
+          className={`flex gap-2 overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
+            isExpanded ? "ml-2 max-w-xs opacity-100" : "ml-0 max-w-0 opacity-0"
+          }`}
         >
-          <PowerIcon className="h-4 w-4" />
-          シャットダウン
-        </button>
+          <button
+            onClick={() => setPendingAction("restart")}
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-100 dark:border-white/10 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700"
+          >
+            <RestartIcon className="h-4 w-4" />
+            再起動
+          </button>
+          <button
+            onClick={() => setPendingAction("shutdown")}
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-rose-200 bg-white px-3.5 text-xs font-medium text-rose-600 shadow-sm transition hover:bg-rose-50 dark:border-rose-500/20 dark:bg-slate-800/80 dark:text-rose-400 dark:hover:bg-rose-500/10"
+          >
+            <PowerIcon className="h-4 w-4" />
+            シャットダウン
+          </button>
+        </div>
       </div>
 
       {pendingAction && (
