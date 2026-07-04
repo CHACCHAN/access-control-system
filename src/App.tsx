@@ -7,6 +7,7 @@ import { useFaceApiModels } from "./shared/hooks/useFaceApiModels";
 import { useTheme } from "./shared/hooks/useTheme";
 import { useEnrolledFaces } from "./features/face-auth/useEnrolledFaces";
 import type { EnrolledFace } from "./features/face-auth/useEnrolledFaces";
+import { SystemControlPanel } from "./features/system-control/SystemControlPanel";
 import { useMembers } from "./entities/member/useMembers";
 import type { AttendanceStatus, Member } from "./entities/member/api";
 import "./App.css";
@@ -72,6 +73,8 @@ export default function App() {
           onToggleTheme={toggleTheme}
         />
       </div>
+
+      <SystemControlPanel />
 
       {faceApiError && (
         <p className="fixed bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-rose-100 px-4 py-2 text-xs text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
