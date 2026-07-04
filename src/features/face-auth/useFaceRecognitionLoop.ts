@@ -6,6 +6,8 @@ import type { EnrolledFace } from "./useEnrolledFaces";
 const MATCH_THRESHOLD = 0.6;
 const CLOSE_THRESHOLD = 0.32;
 const DETECTION_INTERVAL_MS = 800;
+// 確認カード表示中にこの回数連続で顔が検出されなければ、離れたとみなして自動的に閉じる
+const MISS_STREAK_TO_DISMISS = 2;
 
 export type FaceScanHint =
   | "scanning"
@@ -92,13 +94,13 @@ export function useFaceRecognitionLoop({
   const [hint, setHint] = useState<FaceScanHint>("scanning");
   const [matchedMember, setMatchedMember] = useState<Member | null>(null);
   const isCheckingRef = useRef(false);
+  const missCountRef = useRef(0);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const isScanning = active && !matchedMember;
-
   useEffect(() => {
-    if (!isScanning) {
+    if (!active) {
       drawDetectionOverlay(videoRef.current, overlayCanvasRef.current, null);
+      missCountRef.current = 0;
       return;
     }
 
@@ -119,6 +121,21 @@ export function useFaceRecognitionLoop({
           overlayCanvasRef.current,
           detection ?? null,
         );
+
+        if (matchedMember) {
+          // 確認カード表示中は照合をやり直さず、対象が離れたかどうかだけ見る
+          if (!detection) {
+            missCountRef.current += 1;
+            if (missCountRef.current >= MISS_STREAK_TO_DISMISS) {
+              missCountRef.current = 0;
+              setMatchedMember(null);
+              setHint("scanning");
+            }
+          } else {
+            missCountRef.current = 0;
+          }
+          return;
+        }
 
         if (!detection) {
           setHint("scanning");
@@ -150,6 +167,7 @@ export function useFaceRecognitionLoop({
         if (best && best.distance <= MATCH_THRESHOLD) {
           const member = members.find((m) => m.username === best!.username);
           if (member) {
+            missCountRef.current = 0;
             setMatchedMember(member);
             setHint(null);
             return;
@@ -163,9 +181,10 @@ export function useFaceRecognitionLoop({
     }, DETECTION_INTERVAL_MS);
 
     return () => window.clearInterval(timer);
-  }, [isScanning, enrolledFaces, members, videoRef]);
+  }, [active, matchedMember, enrolledFaces, members, videoRef]);
 
   function dismissMatch() {
+    missCountRef.current = 0;
     setMatchedMember(null);
   }
 
