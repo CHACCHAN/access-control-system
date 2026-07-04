@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import * as faceapi from "@vladmandic/face-api";
 
-type FaceApiStatus = "loading" | "ready" | "error";
+type FaceApiModelsStatus = "loading" | "ready" | "error";
 
-interface UseFaceApiResult {
-  status: FaceApiStatus;
+interface UseFaceApiModelsResult {
+  status: FaceApiModelsStatus;
   error: string | null;
 }
 
@@ -13,8 +13,8 @@ const MODEL_URL = "/models";
 /**
  * face-api.js の各モデル(顔検出・ランドマーク・特徴抽出)をロードするフック
  */
-export function useFaceApi(): UseFaceApiResult {
-  const [status, setStatus] = useState<FaceApiStatus>("loading");
+export function useFaceApiModels(): UseFaceApiModelsResult {
+  const [status, setStatus] = useState<FaceApiModelsStatus>("loading");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {

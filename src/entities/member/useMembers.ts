@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
-import { fetchMembers, type Member } from "../api/members";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { fetchMembers, type Member } from "./api";
 
 interface UseMembersResult {
   members: Member[];
+  setMembers: Dispatch<SetStateAction<Member[]>>;
   isLoading: boolean;
   error: string | null;
 }
@@ -31,5 +32,5 @@ export function useMembers(): UseMembersResult {
     };
   }, []);
 
-  return { members, isLoading, error };
+  return { members, setMembers, isLoading, error };
 }

@@ -1,13 +1,13 @@
 import type { RefObject } from "react";
 import type { CameraStatus } from "../hooks/useCamera";
 
-interface CameraViewProps {
+interface CameraFeedProps {
   videoRef: RefObject<HTMLVideoElement | null>;
   status: CameraStatus;
   error: string | null;
 }
 
-export function CameraView({ videoRef, status, error }: CameraViewProps) {
+export function CameraFeed({ videoRef, status, error }: CameraFeedProps) {
   return (
     <div className="absolute inset-0 overflow-hidden rounded-3xl bg-slate-950">
       <video
