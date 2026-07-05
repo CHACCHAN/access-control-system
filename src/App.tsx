@@ -8,6 +8,7 @@ import { useTheme } from "./shared/hooks/useTheme";
 import { useEnrolledFaces } from "./features/face-auth/useEnrolledFaces";
 import type { EnrolledFace } from "./features/face-auth/useEnrolledFaces";
 import { SystemControlPanel } from "./features/system-control/SystemControlPanel";
+import { BootCheckScreen } from "./features/system-check/BootCheckScreen";
 import { useMembers } from "./entities/member/useMembers";
 import type { AttendanceStatus, Member } from "./entities/member/api";
 import "./App.css";
@@ -24,6 +25,7 @@ export default function App() {
     error: membersError,
   } = useMembers();
   const [activeUsername, setActiveUsername] = useState<string | null>(null);
+  const [hasBooted, setHasBooted] = useState(false);
 
   const activeMember = members.find((m) => m.username === activeUsername) ?? null;
 
@@ -47,6 +49,10 @@ export default function App() {
 
   function handleSelectMember(member: Member) {
     setActiveUsername(member.username);
+  }
+
+  if (!hasBooted) {
+    return <BootCheckScreen onContinue={() => setHasBooted(true)} />;
   }
 
   return (

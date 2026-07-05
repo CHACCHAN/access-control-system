@@ -7,7 +7,7 @@ export interface Member {
   descriptor?: number[];
 }
 
-const MEMBERS_API_URL = "https://portal.naka.ai.chibatech.ac.jp/api/members";
+const MEMBERS_API_URL = "https://portal.naka.ai.chibatech.ac.jp/api/current";
 
 const DUMMY_MEMBERS: Member[] = [
   {
@@ -59,4 +59,19 @@ export async function fetchMembers(): Promise<Member[]> {
     throw new Error(`メンバー一覧の取得に失敗しました: ${response.status}`);
   }
   return response.json();
+}
+
+/**
+ * メンバーAPIエンドポイントが生きているかどうかの起動時チェック。
+ * 開発時はダミーデータ運用のため実際の通信は行わず、常に成功扱いにする。
+ */
+export async function checkMembersApiAlive(): Promise<boolean> {
+  if (import.meta.env.DEV) return true;
+
+  try {
+    const response = await fetch(MEMBERS_API_URL);
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
