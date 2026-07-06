@@ -1,4 +1,4 @@
-import type { Member } from "../../entities/member/api";
+import type { Member } from "@/entities/member/api";
 
 interface FaceMatchConfirmCardProps {
   member: Member;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import * as faceapi from "@vladmandic/face-api";
-import type { Member } from "../../entities/member/api";
-import type { EnrolledFace } from "./useEnrolledFaces";
+import type { Member } from "@/entities/member/api";
+import type { EnrolledFace } from "./FaceAuthContext";
 
 const MATCH_THRESHOLD = 0.6;
 const CLOSE_THRESHOLD = 0.32;

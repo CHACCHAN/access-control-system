@@ -11,6 +11,12 @@ interface UseCameraResult {
 /**
  * getUserMedia でカメラ映像を取得し、渡された <video> 要素にアタッチするフック。
  * コンポーネントの unmount 時にはストリームを確実に停止する。
+ *
+ * 呼び出し側のコンポーネントは、実際に `<video ref={videoRef}>` を
+ * マウントするタイミングになってから初めてこのフックを使うこと(= マウントが
+ * 起動トリガーを兼ねる)。取得したストリームは `videoRef.current` に直接代入する
+ * だけで React 管理下にないため、video 要素がまだ無い状態で開始すると、映像取得
+ * 自体は成功していても(status は "streaming" になるが)画面には何も表示されない。
  */
 export function useCamera(): UseCameraResult {
   const videoRef = useRef<HTMLVideoElement | null>(null);

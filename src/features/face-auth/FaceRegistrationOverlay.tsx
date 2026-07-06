@@ -1,14 +1,12 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as faceapi from "@vladmandic/face-api";
-import type { Member } from "../../entities/member/api";
-import { registerFace } from "./api";
-import { ArrowUpIcon, CheckIcon, CloseIcon, ScanFaceIcon } from "../../shared/ui/icons";
+import { useMembers } from "@/entities/member/MemberContext";
+import { registerDescriptor } from "@/entities/member/api";
+import { useSettings } from "@/shared/hooks/useSettings";
+import { useFaceAuth } from "./FaceAuthContext";
+import { ArrowUpIcon, CheckIcon, CloseIcon, ScanFaceIcon } from "@/shared/ui/icons";
 
 interface FaceRegistrationOverlayProps {
-  videoRef: RefObject<HTMLVideoElement | null>;
-  members: Member[];
-  faceApiReady: boolean;
-  onRegistered: (username: string, descriptor: Float32Array) => void;
   onClose: () => void;
 }
 
@@ -17,13 +15,10 @@ type CaptureState = "idle" | "capturing" | "success" | "error";
 // 操作されないまま放置された場合に、自動的に認証モードへ戻すまでの時間
 const IDLE_TIMEOUT_MS = 60_000;
 
-export function FaceRegistrationOverlay({
-  videoRef,
-  members,
-  faceApiReady,
-  onRegistered,
-  onClose,
-}: FaceRegistrationOverlayProps) {
+export function FaceRegistrationOverlay({ onClose }: FaceRegistrationOverlayProps) {
+  const { members } = useMembers();
+  const { settings } = useSettings();
+  const { videoRef, faceApiReady, enroll } = useFaceAuth();
   const [selectedUsername, setSelectedUsername] = useState(members[0]?.username ?? "");
   const [search, setSearch] = useState("");
   const [captureState, setCaptureState] = useState<CaptureState>("idle");
@@ -69,8 +64,13 @@ export function FaceRegistrationOverlay({
         return;
       }
 
-      await registerFace(selectedUsername, detection.descriptor);
-      onRegistered(selectedUsername, detection.descriptor);
+      await registerDescriptor(
+        selectedUsername,
+        Array.from(detection.descriptor),
+        settings.postEndpoint,
+        settings.apiToken,
+      );
+      enroll(selectedUsername, detection.descriptor);
       setCaptureState("success");
       setMessage("顔情報を登録しました");
       setTimeout(onClose, 1200);

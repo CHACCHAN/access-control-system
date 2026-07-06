@@ -1,5 +1,5 @@
 import type { AttendanceStatus } from "./api";
-import { DoorIcon, HomeIcon, WalkIcon } from "../../shared/ui/icons";
+import { DoorIcon, HomeIcon, WalkIcon } from "@/shared/ui/icons";
 
 export const ATTENDANCE_STATUSES: AttendanceStatus[] = ["在室", "外出", "帰宅"];
 

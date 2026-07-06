@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     librsvg2-dev \
     libxdo-dev \
     patchelf \
+    genisoimage \
     && rm -rf /var/lib/apt/lists/*
 
 # WASM Pack
