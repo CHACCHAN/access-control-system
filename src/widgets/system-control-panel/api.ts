@@ -7,3 +7,7 @@ export async function shutdownComputer(): Promise<void> {
 export async function restartComputer(): Promise<void> {
   await invoke("restart_computer");
 }
+
+export async function exitToShell(): Promise<void> {
+  await invoke("exit_app");
+}

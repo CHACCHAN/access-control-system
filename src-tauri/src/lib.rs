@@ -26,9 +26,18 @@ fn restart_computer() -> Result<(), String> {
     Ok(())
 }
 
+// アプリを終了する。startx が本アプリを X セッションの唯一のクライアントとして
+// 起動している運用を想定しており、終了すると X セッションごと終わって
+// startx 実行前のシェルに戻る。
+#[tauri::command]
+fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 // ディスプレイ(モニタ)の解像度・台数の起動時ハードウェアチェック。
 // 実際に色が描画できるかどうかはフロントエンド側の canvas 自己診断で補う。
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DisplayInfo {
     count: usize,
     width: u32,
@@ -52,6 +61,7 @@ fn get_display_info(app: tauri::AppHandle) -> Result<DisplayInfo, String> {
 // サーバー(この端末)のスペック確認用。合否判定ではなく、管理者が目視で
 // 確認するための情報表示として使う。
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SystemSpec {
     os: String,
     hostname: String,
@@ -93,6 +103,7 @@ fn get_system_spec() -> SystemSpec {
 // ネットワーク疎通確認用。ループバックを除く最初の IPv4 インターフェースを返す。
 // リンクローカルアドレス(169.254.x.x 等)しか無い場合は DHCP 未取得とみなす。
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct NetworkInfo {
     interface: String,
     ip: String,
@@ -122,6 +133,7 @@ pub fn run() {
             greet,
             shutdown_computer,
             restart_computer,
+            exit_app,
             get_display_info,
             get_system_spec,
             get_network_info

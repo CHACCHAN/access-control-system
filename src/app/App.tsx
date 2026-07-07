@@ -9,6 +9,7 @@ import { SettingsPanel } from "@/widgets/settings-panel/SettingsPanel";
 import { AppProviders } from "./providers/AppProviders";
 import { useFaceAuth } from "@/features/face-auth/FaceAuthContext";
 import { useKioskSocket } from "@/features/kiosk-socket/useKioskSocket";
+import { ScreenDimmer } from "@/features/screen-dimmer/ScreenDimmer";
 import { useMembers } from "@/entities/member/MemberContext";
 import { useSettings } from "@/shared/hooks/useSettings";
 import "./App.css";
@@ -37,18 +38,23 @@ function MainScreen() {
   const { settings } = useSettings();
   const { refetch } = useMembers();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const lastFiredMinuteRef = useRef<string | null>(null);
+  const lastFiredKeyRef = useRef<string | null>(null);
 
   useKioskSocket(settings.wsEndpoint, refetch);
 
-  // 1分ごとに現在時刻をチェックし、再起動スケジュールと一致したら再起動する
+  // 1分ごとに現在時刻をチェックし、再起動スケジュールと一致したら再起動する。
+  // HH:MM は日をまたいで毎日同じ値になるため、発火済みかどうかは日付込みの
+  // キーで管理し、翌日も同じ時刻に再起動できるようにしている。
   useEffect(() => {
     function checkRebootSchedule() {
       if (!settings.rebootSchedule) return;
+      const now = new Date();
       const current = currentHHMM();
       if (current !== settings.rebootSchedule) return;
-      if (lastFiredMinuteRef.current === current) return;
-      lastFiredMinuteRef.current = current;
+
+      const fireKey = `${now.toDateString()}_${current}`;
+      if (lastFiredKeyRef.current === fireKey) return;
+      lastFiredKeyRef.current = fireKey;
       restartComputer();
     }
 
@@ -74,6 +80,8 @@ function MainScreen() {
       <AttendanceActionSheet />
 
       {isSettingsOpen && <SettingsPanel onClose={() => setIsSettingsOpen(false)} />}
+
+      <ScreenDimmer />
     </main>
   );
 }

@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { isTauri } from "@tauri-apps/api/core";
 import { useSettings, type AppSettings } from "@/shared/hooks/useSettings";
+import { exitToShell, restartComputer } from "@/widgets/system-control-panel/api";
 import { CheckIcon, CloseIcon } from "@/shared/ui/icons";
 
 interface SettingsPanelProps {
@@ -14,15 +16,28 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const { settings, updateSettings } = useSettings();
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [isRestarting, setIsRestarting] = useState(false);
+  const [isConfirmingExit, setIsConfirmingExit] = useState(false);
 
   useEffect(() => {
     setDraft(settings);
   }, [settings]);
 
-  function handleSave(e: FormEvent) {
+  async function handleSave(e: FormEvent) {
     e.preventDefault();
-    updateSettings(draft);
+    await updateSettings(draft);
     setSavedAt(Date.now());
+    // 設定変更(特にエンドポイント類)を確実に反映させるため、保存後は自動的に再起動する
+    if (isTauri()) {
+      setIsRestarting(true);
+      await restartComputer();
+    }
+  }
+
+  async function handleExitToShell() {
+    if (isTauri()) {
+      await exitToShell();
+    }
   }
 
   return (
@@ -50,6 +65,17 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           type="time"
           value={draft.rebootSchedule}
           onChange={(e) => setDraft((d) => ({ ...d, rebootSchedule: e.target.value }))}
+          className={FIELD_CLASSES}
+        />
+
+        <label className={LABEL_CLASSES} htmlFor="screen-off-schedule">
+          自動消灯時間
+        </label>
+        <input
+          id="screen-off-schedule"
+          type="time"
+          value={draft.screenOffSchedule}
+          onChange={(e) => setDraft((d) => ({ ...d, screenOffSchedule: e.target.value }))}
           className={FIELD_CLASSES}
         />
 
@@ -103,17 +129,58 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
         <button
           type="submit"
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-sky-500 py-3 text-sm font-semibold text-white transition hover:bg-sky-400"
+          disabled={isRestarting}
+          className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-sky-500 py-3 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          <CheckIcon className="h-4 w-4" />
+          {isRestarting ? (
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+          ) : (
+            <CheckIcon className="h-4 w-4" />
+          )}
           保存する
         </button>
 
         {savedAt && (
           <p className="mt-3 text-center text-xs text-emerald-600 dark:text-emerald-400">
-            保存しました
+            {isRestarting ? "保存しました。再起動します..." : "保存しました"}
           </p>
         )}
+
+        <div className="mt-8 flex items-center justify-between border-t border-slate-200 pt-5 dark:border-white/10">
+          <div>
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">シェル</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              アプリを終了し、起動前のシェル画面に戻ります
+            </p>
+          </div>
+
+          {isConfirmingExit ? (
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                onClick={() => setIsConfirmingExit(false)}
+                className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/5"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleExitToShell}
+                className="rounded-full bg-rose-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-rose-400"
+              >
+                終了する
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsConfirmingExit(true)}
+              className="shrink-0 rounded-full border border-slate-200 px-3.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/5"
+            >
+              終了
+            </button>
+          )}
+        </div>
       </form>
     </div>
   );

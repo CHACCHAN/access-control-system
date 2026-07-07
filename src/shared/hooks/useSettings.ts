@@ -16,6 +16,7 @@ export type Theme = "light" | "dark";
 export interface AppSettings {
   theme: Theme;
   rebootSchedule: string;
+  screenOffSchedule: string;
   getEndpoint: string;
   postEndpoint: string;
   wsEndpoint: string;
@@ -25,6 +26,7 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "dark",
   rebootSchedule: "",
+  screenOffSchedule: "",
   getEndpoint: "",
   postEndpoint: "",
   wsEndpoint: "",
@@ -72,7 +74,7 @@ async function saveSettings(settings: AppSettings): Promise<void> {
 interface SettingsContextValue {
   settings: AppSettings;
   isLoading: boolean;
-  updateSettings: (partial: Partial<AppSettings>) => void;
+  updateSettings: (partial: Partial<AppSettings>) => Promise<void>;
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
@@ -105,7 +107,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const updateSettings = useCallback((partial: Partial<AppSettings>) => {
     const next = { ...settingsRef.current, ...partial };
     setSettings(next);
-    void saveSettings(next);
+    return saveSettings(next);
   }, []);
 
   return createElement(SettingsContext.Provider, {
