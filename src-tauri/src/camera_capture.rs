@@ -93,18 +93,33 @@ pub fn stop_camera_capture(state: State<CameraCaptureState>) -> Result<(), Strin
     Ok(())
 }
 
+// 要求フォーマットの候補。nokhwa の Closest は FrameFormat の完全一致を要求する
+// (一致するものが無いと "Failed to Fulfill" で開けない)ため、MJPEG 決め打ちだと
+// YUYV しか提供しない仮想カメラ(v4l2loopback 等)で失敗する。実カメラで効率の
+// よい MJPEG から順に試し、最後はフォーマット不問の最高解像度にフォールバックする。
+fn format_candidates() -> Vec<(&'static str, RequestedFormat<'static>)> {
+    let closest = |fmt: FrameFormat| {
+        RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(CameraFormat::new(
+            Resolution::new(CAPTURE_WIDTH, CAPTURE_HEIGHT),
+            fmt,
+            30,
+        )))
+    };
+    vec![
+        ("MJPEG", closest(FrameFormat::MJPEG)),
+        ("YUYV", closest(FrameFormat::YUYV)),
+        ("NV12", closest(FrameFormat::NV12)),
+        (
+            "最高解像度(フォーマット不問)",
+            RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestResolution),
+        ),
+    ]
+}
+
 // システム上のカメラデバイスを列挙し、開けた最初のカメラを返す。
 // /dev/video0 を決め打ちにすると、仮想カメラが /dev/video10 として存在する
 // VM 環境などで「No such file or directory」で失敗するため、必ず列挙する。
 fn open_first_available_camera() -> Result<Camera, String> {
-    let requested = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(
-        CameraFormat::new(
-            Resolution::new(CAPTURE_WIDTH, CAPTURE_HEIGHT),
-            FrameFormat::MJPEG,
-            30,
-        ),
-    ));
-
     let devices = nokhwa::query(ApiBackend::Auto)
         .map_err(|e| format!("カメラ一覧の取得に失敗しました: {e}"))?;
     if devices.is_empty() {
@@ -117,14 +132,23 @@ fn open_first_available_camera() -> Result<Camera, String> {
 
     let mut last_err = String::new();
     for info in &devices {
-        match Camera::new(info.index().clone(), requested) {
-            Ok(camera) => {
-                eprintln!("[camera-capture] {} を使用します", info.human_name());
-                return Ok(camera);
-            }
-            Err(e) => {
-                eprintln!("[camera-capture] {} を開けません: {e}", info.human_name());
-                last_err = format!("{}: {e}", info.human_name());
+        for (label, requested) in format_candidates() {
+            match Camera::new(info.index().clone(), requested) {
+                Ok(camera) => {
+                    eprintln!(
+                        "[camera-capture] {} を {label} で使用します(実際: {})",
+                        info.human_name(),
+                        camera.camera_format(),
+                    );
+                    return Ok(camera);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[camera-capture] {} ({label}) を開けません: {e}",
+                        info.human_name()
+                    );
+                    last_err = format!("{} ({label}): {e}", info.human_name());
+                }
             }
         }
     }
