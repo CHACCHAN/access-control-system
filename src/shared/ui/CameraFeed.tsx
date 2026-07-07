@@ -35,6 +35,13 @@ export function CameraFeed({ mediaRef, mediaKind, status, error }: CameraFeedPro
           <p>カメラの起動に失敗しました: {error}</p>
         </div>
       )}
+      {status === "unavailable" && (
+        // 異常ではない(実カメラが無いだけ)ので、赤いエラーにはせず中立的に案内する。
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-slate-950/90 px-6 text-center text-slate-400">
+          <p className="text-sm">カメラ映像なし</p>
+          {error && <p className="text-xs text-slate-500">{error}</p>}
+        </div>
+      )}
     </div>
   );
 }

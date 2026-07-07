@@ -19,6 +19,13 @@ const FRAME_INTERVAL: Duration = Duration::from_millis(100);
 const CAPTURE_WIDTH: u32 = 640;
 const CAPTURE_HEIGHT: u32 = 480;
 const JPEG_QUALITY: u8 = 75;
+// カメラ(特に FaceTime HD 等)は open_stream() 直後の数フレームが真っ黒や
+// 露出未調整で返ってくることがあるため、最初の数フレームは捨てて自動露出が
+// 落ち着くのを待つ。捨てている間のフレーム取得エラーも無視する。
+const WARMUP_FRAMES: u32 = 8;
+// 一過性の v4l2 エラーで無人キオスクが復帰不能にならないよう、連続で
+// この回数失敗するまではキャプチャを継続する(単発の失敗は握りつぶす)。
+const MAX_CONSECUTIVE_ERRORS: u32 = 15;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,10 +47,18 @@ pub fn start_camera_capture(app: AppHandle, state: State<CameraCaptureState>) ->
         .0
         .lock()
         .map_err(|_| "内部状態のロックに失敗しました".to_string())?;
-    if guard.is_some() {
-        // 既に起動中(多重起動を防ぐ。boot-check と顔認証パネルの両方から
-        // 呼ばれても、実際にカメラを掴むのは最初の呼び出しだけにする)
-        return Ok(());
+    if let Some(handle) = guard.as_ref() {
+        if handle.join_handle.is_finished() {
+            // 前回のキャプチャスレッドが自己終了(連続エラー等)している場合は、
+            // 残骸のハンドルを回収してから下で新規に起動し直す。
+            if let Some(old) = guard.take() {
+                let _ = old.join_handle.join();
+            }
+        } else {
+            // まだ動作中(多重起動を防ぐ。boot-check と顔認証パネルの両方から
+            // 呼ばれても、実際にカメラを掴むのは最初の呼び出しだけにする)
+            return Ok(());
+        }
     }
 
     let stop_flag = Arc::new(AtomicBool::new(false));
@@ -98,16 +113,34 @@ fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>) {
         return;
     }
 
+    // ウォームアップ:最初の数フレームを捨てる(この間のエラーは無視する)。
+    for _ in 0..WARMUP_FRAMES {
+        if stop_flag.load(Ordering::SeqCst) {
+            return;
+        }
+        let _ = camera.frame();
+    }
+
+    let mut consecutive_errors: u32 = 0;
     while !stop_flag.load(Ordering::SeqCst) {
         let loop_start = Instant::now();
 
         match capture_and_encode_frame(&mut camera) {
             Ok(image_data) => {
+                consecutive_errors = 0;
                 let _ = app.emit("camera-frame", CameraFramePayload { image_data });
             }
             Err(e) => {
-                let _ = app.emit("camera-error", format!("フレームの取得に失敗しました: {e}"));
-                break;
+                consecutive_errors += 1;
+                // 連続で規定回数失敗した場合のみ、復帰不能とみなして通知・終了する。
+                // それ未満の単発エラーは次のフレームで回復する見込みとして握りつぶす。
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                    let _ = app.emit(
+                        "camera-error",
+                        format!("フレームの取得に連続{consecutive_errors}回失敗しました: {e}"),
+                    );
+                    break;
+                }
             }
         }
 
