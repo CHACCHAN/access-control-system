@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { withTimeout } from "@/shared/lib/withTimeout";
 
 export type CameraStatus = "idle" | "requesting" | "streaming" | "error";
+
+// WebKitGTK では権限リクエストが取りこぼされると getUserMedia() が
+// resolve/reject されずに無限に待ち続けることがあるため、上限時間を設ける。
+const GET_USER_MEDIA_TIMEOUT_MS = 5000;
 
 interface UseCameraResult {
   videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -30,7 +35,7 @@ export function useCamera(): UseCameraResult {
     async function startCamera() {
       setStatus("requesting");
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
+        const getUserMediaPromise = navigator.mediaDevices.getUserMedia({
           video: {
             width: { ideal: 640 },
             height: { ideal: 480 },
@@ -38,6 +43,19 @@ export function useCamera(): UseCameraResult {
           },
           audio: false,
         });
+        // タイムアウトで先に諦めた後にストリームが届いても掴みっぱなしにしない
+        getUserMediaPromise.then(
+          (lateStream) => {
+            if (stream !== lateStream) lateStream.getTracks().forEach((track) => track.stop());
+          },
+          () => {},
+        );
+
+        stream = await withTimeout(
+          getUserMediaPromise,
+          GET_USER_MEDIA_TIMEOUT_MS,
+          "カメラへのアクセス要求がタイムアウトしました",
+        );
 
         if (cancelled) {
           // コンポーネントが既に unmount されていたら即座に停止する

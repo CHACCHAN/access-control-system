@@ -1,6 +1,8 @@
 use serde::Serialize;
 use sysinfo::{Disks, System};
 
+mod camera_capture;
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -124,11 +126,77 @@ fn get_network_info() -> Result<NetworkInfo, String> {
         .ok_or_else(|| "有効なネットワークインターフェースが見つかりません".to_string())
 }
 
+// Linux(webkit2gtk)ではカメラ/マイクへのアクセスは WebKitPermissionRequest
+// シグナルで制御される。ハンドラーを繋がないとデフォルトで拒否されるため、
+// メインウィンドウの WebView に対して明示的に許可するハンドラーを登録する。
+// このアプリはキオスク端末専用で、顔認証のためにカメラ常時利用を前提として
+// いるので、ユーザーへの都度確認は行わず自動許可する。
+#[cfg(target_os = "linux")]
+fn setup_webkit_media_permissions(app: &tauri::App) {
+    use tauri::Manager;
+    use webkit2gtk::{
+        glib::ObjectExt, DeviceInfoPermissionRequest, PermissionRequestExt, SettingsExt,
+        UserMediaPermissionRequest, WebViewExt,
+    };
+
+    let Some(window) = app.get_webview_window("main") else {
+        eprintln!("[webkit-permissions] メインウィンドウ(main)が見つかりませんでした");
+        return;
+    };
+
+    let result = window.with_webview(|webview| {
+        let webview = webview.inner();
+
+        match webview.settings() {
+            Some(settings) => {
+                settings.set_enable_media_stream(true);
+                // ページの console.log/console.error 等をプロセスの標準出力にも書き出す。
+                // これが無いと、フロントエンド側で仕込んだデバッグログ(console.log)は
+                // Web Inspector を開かない限りホスト側のログには一切残らない。
+                settings.set_enable_write_console_messages_to_stdout(true);
+                eprintln!(
+                    "[webkit-permissions] enable-media-stream / write-console-messages-to-stdout を有効化しました"
+                );
+            }
+            None => eprintln!("[webkit-permissions] settings() が取得できませんでした"),
+        }
+
+        // getUserMedia() は WebKitUserMediaPermissionRequest だけでなく、デバイス一覧
+        // (enumerateDevices のラベル解決)を確認するための WebKitDeviceInfoPermissionRequest
+        // を別途発行することがある。後者を許可し忘れると、getUserMedia の Promise が
+        // resolve も reject もされないまま無限に待ち続ける(=画面が "[...]" のまま止まる)
+        // 症状になるため、両方を明示的に許可する。
+        webview.connect_permission_request(|_webview, request| {
+            let is_user_media = request.is::<UserMediaPermissionRequest>();
+            let is_device_info = request.is::<DeviceInfoPermissionRequest>();
+            eprintln!(
+                "[webkit-permissions] permission-request 受信: user_media={is_user_media} device_info={is_device_info}"
+            );
+            if is_user_media || is_device_info {
+                request.allow();
+                eprintln!("[webkit-permissions] allow() を呼び出しました");
+                true
+            } else {
+                // カメラ/マイク以外(通知・位置情報等)の権限要求はこのハンドラーでは
+                // 扱わず、WebKit のデフォルト挙動(拒否)に委ねる。
+                false
+            }
+        });
+
+        eprintln!("[webkit-permissions] permission-request ハンドラーを登録しました");
+    });
+
+    if let Err(e) = result {
+        eprintln!("[webkit-permissions] with_webview に失敗しました: {e}");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .manage(camera_capture::CameraCaptureState::default())
         .invoke_handler(tauri::generate_handler![
             greet,
             shutdown_computer,
@@ -136,8 +204,15 @@ pub fn run() {
             exit_app,
             get_display_info,
             get_system_spec,
-            get_network_info
+            get_network_info,
+            camera_capture::start_camera_capture,
+            camera_capture::stop_camera_capture
         ])
+        .setup(|app| {
+            #[cfg(target_os = "linux")]
+            setup_webkit_media_permissions(app);
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -22,7 +22,14 @@ export function loadFaceApiModels(): Promise<void> {
       faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
       faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
       faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-    ]).then(() => undefined);
+    ]).then(() => {
+      // webgl以外(wasm/cpu)にフォールバックしていると検出が大幅に遅くなるため、
+      // 実機での性能調査用にどのバックエンドが使われているかログに残す。
+      // @vladmandic/face-api の型定義には tf.getBackend() が含まれていないが、
+      // 実行時には tfjs-core のAPIがそのまま faceapi.tf として提供されている。
+      const tf = faceapi.tf as unknown as { getBackend(): string };
+      console.log(`[face-api] tfjs backend: ${tf.getBackend()}`);
+    });
   }
   return modelsPromise;
 }

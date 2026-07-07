@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useAppVersion } from "@/shared/hooks/useAppVersion";
 import { BOOT_CHECKS } from "./checks";
 import { useBootChecks, type BootCheckState } from "./useBootChecks";
 
@@ -20,6 +21,7 @@ const STATE_CLASSES: Record<BootCheckState, string> = {
 
 export function BootCheckScreen({ onContinue }: BootCheckScreenProps) {
   const { results, isComplete, hasFailure } = useBootChecks(BOOT_CHECKS);
+  const version = useAppVersion();
 
   useEffect(() => {
     if (!isComplete || hasFailure) return;
@@ -29,6 +31,9 @@ export function BootCheckScreen({ onContinue }: BootCheckScreenProps) {
 
   return (
     <div className="fixed inset-0 z-100 flex flex-col items-center justify-center bg-black px-6 font-mono text-sm text-slate-300">
+      {version && (
+        <p className="fixed left-4 top-4 text-xs text-slate-600">v{version}</p>
+      )}
       <div className="w-full max-w-md">
         <p className="mb-4 text-slate-500">システムを起動しています...</p>
 

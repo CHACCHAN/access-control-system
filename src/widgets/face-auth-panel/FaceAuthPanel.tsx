@@ -25,14 +25,14 @@ interface FaceAuthPanelProps {
 
 export function FaceAuthPanel({ onOpenSettings }: FaceAuthPanelProps) {
   const { members, activeMember, selectMember } = useMembers();
-  const { videoRef, cameraStatus, cameraError, faceApiReady, enrolledFaces } =
+  const { mediaRef, mediaKind, cameraStatus, cameraError, faceApiReady, enrolledFaces } =
     useFaceAuth();
   const [mode, setMode] = useState<"recognize" | "register">("recognize");
   const isPaused = activeMember !== null;
 
   const { overlayCanvasRef, hint, matchedMember, dismissMatch } =
     useFaceRecognitionLoop({
-      videoRef,
+      mediaRef,
       members,
       enrolledFaces,
       active:
@@ -83,7 +83,8 @@ export function FaceAuthPanel({ onOpenSettings }: FaceAuthPanelProps) {
 
       <div className="relative flex-1 overflow-hidden rounded-3xl bg-slate-900 shadow-inner shadow-black/40">
         <CameraFeed
-          videoRef={videoRef}
+          mediaRef={mediaRef}
+          mediaKind={mediaKind}
           status={cameraStatus}
           error={cameraError}
         />

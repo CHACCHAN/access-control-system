@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { isTauri } from "@tauri-apps/api/core";
+import { useAppVersion } from "@/shared/hooks/useAppVersion";
 import { useSettings, type AppSettings } from "@/shared/hooks/useSettings";
 import { exitToShell, restartComputer } from "@/widgets/system-control-panel/api";
 import { CheckIcon, CloseIcon } from "@/shared/ui/icons";
@@ -18,6 +19,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
   const [isConfirmingExit, setIsConfirmingExit] = useState(false);
+  const version = useAppVersion();
 
   useEffect(() => {
     setDraft(settings);
@@ -56,6 +58,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         </button>
 
         <h2 className="text-lg font-semibold text-slate-900 dark:text-white">設定</h2>
+        {version && (
+          <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">v{version}</p>
+        )}
 
         <label className="mt-6 block text-xs font-medium text-slate-500 dark:text-slate-400" htmlFor="reboot-schedule">
           再起動スケジュール

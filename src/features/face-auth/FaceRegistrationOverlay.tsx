@@ -18,7 +18,7 @@ const IDLE_TIMEOUT_MS = 60_000;
 export function FaceRegistrationOverlay({ onClose }: FaceRegistrationOverlayProps) {
   const { members } = useMembers();
   const { settings } = useSettings();
-  const { videoRef, faceApiReady, enroll } = useFaceAuth();
+  const { mediaRef, faceApiReady, enroll } = useFaceAuth();
   const [selectedUsername, setSelectedUsername] = useState(members[0]?.username ?? "");
   const [search, setSearch] = useState("");
   const [captureState, setCaptureState] = useState<CaptureState>("idle");
@@ -46,15 +46,15 @@ export function FaceRegistrationOverlay({ onClose }: FaceRegistrationOverlayProp
       setMessage("登録するメンバーを選択してください");
       return;
     }
-    const video = videoRef.current;
-    if (!video || !faceApiReady) return;
+    const media = mediaRef.current;
+    if (!media || !faceApiReady) return;
 
     setCaptureState("capturing");
     setMessage(null);
 
     try {
       const detection = await faceapi
-        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+        .detectSingleFace(media, new faceapi.TinyFaceDetectorOptions())
         .withFaceLandmarks()
         .withFaceDescriptor();
 
