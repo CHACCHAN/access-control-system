@@ -5,7 +5,9 @@
 use image::codecs::jpeg::JpegEncoder;
 use nokhwa::{
     pixel_format::RgbFormat,
-    utils::{CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution},
+    utils::{
+        ApiBackend, CameraFormat, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
+    },
     Camera,
 };
 use serde::Serialize;
@@ -91,7 +93,10 @@ pub fn stop_camera_capture(state: State<CameraCaptureState>) -> Result<(), Strin
     Ok(())
 }
 
-fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>) {
+// システム上のカメラデバイスを列挙し、開けた最初のカメラを返す。
+// /dev/video0 を決め打ちにすると、仮想カメラが /dev/video10 として存在する
+// VM 環境などで「No such file or directory」で失敗するため、必ず列挙する。
+fn open_first_available_camera() -> Result<Camera, String> {
     let requested = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(
         CameraFormat::new(
             Resolution::new(CAPTURE_WIDTH, CAPTURE_HEIGHT),
@@ -100,10 +105,37 @@ fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>) {
         ),
     ));
 
-    let mut camera = match Camera::new(CameraIndex::Index(0), requested) {
+    let devices = nokhwa::query(ApiBackend::Auto)
+        .map_err(|e| format!("カメラ一覧の取得に失敗しました: {e}"))?;
+    if devices.is_empty() {
+        return Err("カメラデバイスが見つかりません".to_string());
+    }
+    eprintln!(
+        "[camera-capture] 検出されたカメラ: {:?}",
+        devices.iter().map(|d| d.human_name()).collect::<Vec<_>>()
+    );
+
+    let mut last_err = String::new();
+    for info in &devices {
+        match Camera::new(info.index().clone(), requested) {
+            Ok(camera) => {
+                eprintln!("[camera-capture] {} を使用します", info.human_name());
+                return Ok(camera);
+            }
+            Err(e) => {
+                eprintln!("[camera-capture] {} を開けません: {e}", info.human_name());
+                last_err = format!("{}: {e}", info.human_name());
+            }
+        }
+    }
+    Err(format!("カメラを開けませんでした: {last_err}"))
+}
+
+fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>) {
+    let mut camera = match open_first_available_camera() {
         Ok(camera) => camera,
         Err(e) => {
-            let _ = app.emit("camera-error", format!("カメラを開けませんでした: {e}"));
+            let _ = app.emit("camera-error", e);
             return;
         }
     };
