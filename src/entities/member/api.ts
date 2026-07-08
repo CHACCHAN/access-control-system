@@ -46,7 +46,10 @@ const DUMMY_MEMBERS: Member[] = [
   },
 ];
 
-export async function fetchMembers(getEndpoint: string, apiToken: string): Promise<Member[]> {
+export async function fetchMembers(
+  getEndpoint: string,
+  apiToken: string,
+): Promise<Member[]> {
   if (import.meta.env.DEV) {
     await new Promise((resolve) => setTimeout(resolve, 300));
     return DUMMY_MEMBERS;
@@ -65,7 +68,9 @@ export async function fetchMembers(getEndpoint: string, apiToken: string): Promi
  * メンバーAPIエンドポイントが生きているかどうかの起動時チェック。
  * 開発時はダミーデータ運用のため実際の通信は行わず、常に成功扱いにする。
  */
-export async function checkMembersApiAlive(getEndpoint: string): Promise<boolean> {
+export async function checkMembersApiAlive(
+  getEndpoint: string,
+): Promise<boolean> {
   if (import.meta.env.DEV) return true;
   if (!getEndpoint) return false;
 
@@ -84,7 +89,10 @@ export async function registerDescriptor(
   apiToken: string,
 ): Promise<void> {
   if (import.meta.env.DEV) {
-    console.log("[開発者モード] 特徴ベクトル登録(送信スキップ)", { username, descriptor });
+    console.log("[開発者モード] 特徴ベクトル登録(送信スキップ)", {
+      username,
+      descriptor,
+    });
     return;
   }
 
@@ -92,7 +100,7 @@ export async function registerDescriptor(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: apiToken,
+      Authorization: `Bearer ${apiToken}`,
     },
     body: JSON.stringify({ descriptor }),
   });
