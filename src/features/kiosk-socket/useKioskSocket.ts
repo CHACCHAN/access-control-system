@@ -51,11 +51,13 @@ export function useKioskSocket(
 
       socket.onopen = () => {
         if (cancelled) return;
+        console.info(`[kiosk-socket] 接続しました: ${wsEndpoint}`);
         setStatus("connected");
       };
 
       socket.onmessage = (event) => {
         if (cancelled) return;
+        console.info(`[kiosk-socket] シグナル受信: ${event.data}`);
         try {
           const data = JSON.parse(event.data);
           if (data?.message === "update") {
@@ -68,11 +70,13 @@ export function useKioskSocket(
 
       socket.onclose = () => {
         if (cancelled) return;
+        console.warn("[kiosk-socket] 切断されました。再接続します");
         setStatus("disconnected");
         reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
       };
 
       socket.onerror = () => {
+        console.error("[kiosk-socket] エラーが発生しました");
         socket?.close();
       };
     }

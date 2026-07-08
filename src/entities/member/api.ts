@@ -1,3 +1,8 @@
+// このファイル内の fetch() は全て @tauri-apps/plugin-http のものを使う
+// (グローバルの window.fetch を上書きしている)。GET(fetchMembers /
+// checkMembersApiAlive)だけでなく POST(registerDescriptor)も含め、
+// ファイル内の全リクエストが Rust(reqwest)側から行われるため、
+// ブラウザのCORS制約を受けない。
 import { fetch } from "@tauri-apps/plugin-http";
 
 export type AttendanceStatus = "在室" | "外出" | "帰宅";
@@ -9,44 +14,20 @@ export interface Member {
   descriptor?: number[];
 }
 
-const DUMMY_MEMBERS: Member[] = [
-  {
-    username: "dummy.student01",
-    name: "ダミー 太郎",
+const DUMMY_STATUSES: AttendanceStatus[] = ["在室", "外出", "帰宅"];
+// メンバーが多い場合のレイアウト(スクロール等)を開発時にも確認できるよう、
+// ある程度の件数をまとめて生成する。
+const DUMMY_MEMBER_COUNT = 40;
+
+const DUMMY_MEMBERS: Member[] = Array.from({ length: DUMMY_MEMBER_COUNT }, (_, i) => {
+  const n = i + 1;
+  return {
+    username: `dummy.student${String(n).padStart(2, "0")}`,
+    name: `ダミー ${n}号`,
     descriptor: Array.from({ length: 128 }, () => Math.random() * 2 - 1),
-    status: "在室",
-  },
-  {
-    username: "dummy.student02",
-    name: "ダミー 花子",
-    descriptor: Array.from({ length: 128 }, () => Math.random() * 2 - 1),
-    status: "外出",
-  },
-  {
-    username: "dummy.student03",
-    name: "ダミー 次郎",
-    descriptor: Array.from({ length: 128 }, () => Math.random() * 2 - 1),
-    status: "帰宅",
-  },
-  {
-    username: "dummy.student04",
-    name: "ダミー 三郎",
-    descriptor: Array.from({ length: 128 }, () => Math.random() * 2 - 1),
-    status: "在室",
-  },
-  {
-    username: "dummy.student05",
-    name: "ダミー 四郎",
-    descriptor: Array.from({ length: 128 }, () => Math.random() * 2 - 1),
-    status: "帰宅",
-  },
-  {
-    username: "dummy.student06",
-    name: "ダミー 五郎",
-    descriptor: Array.from({ length: 128 }, () => Math.random() * 2 - 1),
-    status: "帰宅",
-  },
-];
+    status: DUMMY_STATUSES[i % DUMMY_STATUSES.length],
+  };
+});
 
 export async function fetchMembers(
   getEndpoint: string,
@@ -79,7 +60,9 @@ export async function fetchMembers(
     );
     throw new Error(`メンバー一覧の取得に失敗しました: ${response.status}`);
   }
-  return response.json();
+  const members: Member[] = await response.json();
+  console.log(`[fetchMembers] ${members.length}件取得しました`);
+  return members;
 }
 
 /**
@@ -99,8 +82,10 @@ export async function checkMembersApiAlive(
     const response = await fetch(getEndpoint, {
       headers: { Authorization: apiToken },
     });
+    console.log(`[checkMembersApiAlive] status=${response.status}`);
     return response.ok;
-  } catch {
+  } catch (err) {
+    console.error("[checkMembersApiAlive] 接続エラー:", err);
     return false;
   }
 }
@@ -119,6 +104,7 @@ export async function registerDescriptor(
     return;
   }
 
+  console.log(`[registerDescriptor] POST ${postEndpoint}/${username}`);
   const response = await fetch(`${postEndpoint}/${username}`, {
     method: "POST",
     headers: {
@@ -132,6 +118,8 @@ export async function registerDescriptor(
   });
 
   if (!response.ok) {
+    console.error(`[registerDescriptor] HTTPエラー: status=${response.status}`);
     throw new Error(`特徴ベクトルの登録に失敗しました: ${response.status}`);
   }
+  console.log(`[registerDescriptor] ${username} の登録に成功しました`);
 }

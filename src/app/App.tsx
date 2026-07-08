@@ -64,7 +64,15 @@ function MainScreen() {
 
   return (
     <main className="h-screen w-screen bg-slate-100 dark:bg-slate-950">
-      <div className="grid h-full grid-cols-2 divide-x divide-slate-200 dark:divide-white/10 *:min-h-0">
+      {/*
+        grid-rows-[minmax(0,1fr)] が無いと、暗黙の行トラックは既定で「コンテンツに
+        合わせて伸びるサイズ(auto)」になる。子要素に min-h-0 を付けるだけでは
+        行トラック自体の上限が定まらないため、コンテンツ量に応じて行(ひいては
+        グリッド自体)が h-full を超えて伸びてしまう。minmax(0,1fr) で明示的に
+        「コンテナの高さちょうど・下限0(縮小可)」にし、はみ出た分は各パネル内部の
+        overflow-y-auto に処理させる。
+      */}
+      <div className="grid h-full grid-cols-2 grid-rows-[minmax(0,1fr)] divide-x divide-slate-200 dark:divide-white/10 *:min-h-0">
         <MemberListPanel />
         <FaceAuthPanel onOpenSettings={() => setIsSettingsOpen(true)} />
       </div>
