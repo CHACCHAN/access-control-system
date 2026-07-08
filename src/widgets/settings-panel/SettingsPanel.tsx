@@ -19,6 +19,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
   const [isConfirmingExit, setIsConfirmingExit] = useState(false);
+  const [isConfirmingSave, setIsConfirmingSave] = useState(false);
   const version = useAppVersion();
 
   useEffect(() => {
@@ -27,6 +28,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
+    // 実機では保存後に自動で再起動するため、初回の送信では確認クッションを
+    // 挟むだけにし、実際の保存・再起動は確認後(2回目の送信)に行う。
+    if (isTauri() && !isConfirmingSave) {
+      setIsConfirmingSave(true);
+      return;
+    }
+    setIsConfirmingSave(false);
     await updateSettings(draft);
     setSavedAt(Date.now());
     // 設定変更(特にエンドポイント類)を確実に反映させるため、保存後は自動的に再起動する
@@ -132,18 +140,47 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           className={FIELD_CLASSES}
         />
 
-        <button
-          type="submit"
-          disabled={isRestarting}
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-sky-500 py-3 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isRestarting ? (
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-          ) : (
-            <CheckIcon className="h-4 w-4" />
-          )}
-          保存する
-        </button>
+        {isConfirmingSave ? (
+          <div className="mt-6 animate-fade-in rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+            <p className="text-sm text-amber-800 dark:text-amber-300">
+              保存すると設定を反映するため端末を再起動します。よろしいですか？
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setIsConfirmingSave(false)}
+                className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 dark:border-white/10 dark:bg-transparent dark:text-slate-300 dark:hover:bg-white/5"
+              >
+                キャンセル
+              </button>
+              <button
+                type="submit"
+                disabled={isRestarting}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-amber-500 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isRestarting ? (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                ) : (
+                  <CheckIcon className="h-4 w-4" />
+                )}
+                保存して再起動する
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="submit"
+            disabled={isRestarting}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-sky-500 py-3 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isRestarting ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+            ) : (
+              <CheckIcon className="h-4 w-4" />
+            )}
+            保存する
+          </button>
+        )}
 
         {savedAt && (
           <p className="mt-3 text-center text-xs text-emerald-600 dark:text-emerald-400">

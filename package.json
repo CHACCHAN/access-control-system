@@ -1,7 +1,7 @@
 {
   "name": "access-control-system",
   "private": true,
-  "version": "0.2.11",
+  "version": "0.2.12",
   "type": "module",
   "scripts": {
     "dev": "vite --host",

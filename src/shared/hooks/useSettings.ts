@@ -69,6 +69,11 @@ async function saveSettings(settings: AppSettings): Promise<void> {
   if (!isTauri()) return;
   const store = await getStore();
   await store.set(SETTINGS_KEY, settings);
+  // autoSave はデフォルト100msデバウンスでのディスク書き込みのため、set() の
+  // resolve だけでは実際の書き込み完了を保証しない。保存直後に再起動を伴う
+  // 呼び出し元(設定画面)があるため、ここで明示的に save() を待って
+  // ディスクへの書き込みを確実に完了させてから戻る。
+  await store.save();
 }
 
 interface SettingsContextValue {
