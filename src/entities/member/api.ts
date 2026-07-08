@@ -4,6 +4,7 @@
 // ファイル内の全リクエストが Rust(reqwest)側から行われるため、
 // ブラウザのCORS制約を受けない。
 import { fetch } from "@tauri-apps/plugin-http";
+import { applyBodyTemplate } from "@/shared/lib/apiBodyTemplate";
 
 export type AttendanceStatus = "在室" | "外出" | "帰宅";
 
@@ -95,6 +96,7 @@ export async function registerDescriptor(
   descriptor: number[],
   postEndpoint: string,
   apiToken: string,
+  bodyTemplate: string,
 ): Promise<void> {
   if (import.meta.env.DEV) {
     console.log("[開発者モード] 特徴ベクトル登録(送信スキップ)", {
@@ -104,7 +106,8 @@ export async function registerDescriptor(
     return;
   }
 
-  console.log(`[registerDescriptor] POST ${postEndpoint}/${username}`);
+  const body = applyBodyTemplate(bodyTemplate, { username, descriptor });
+  console.log(`[registerDescriptor] POST ${postEndpoint}/${username}`, body);
   const response = await fetch(`${postEndpoint}/${username}`, {
     method: "POST",
     headers: {
@@ -114,7 +117,7 @@ export async function registerDescriptor(
       // を重ねて付けない(付けると "Bearer Bearer xxx" になってしまう)。
       Authorization: apiToken,
     },
-    body: JSON.stringify({ descriptor }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {

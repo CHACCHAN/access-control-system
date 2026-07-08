@@ -13,14 +13,37 @@ import { load, type Store } from "@tauri-apps/plugin-store";
 
 export type Theme = "light" | "dark";
 
+// リクエストボディの JSON テンプレート内で、実際の値に置き換えるプレース
+// ホルダー。バックエンド側のフィールド名が変わっても、アプリを再ビルドせず
+// 設定画面(APIボディ)からテンプレートを書き換えるだけで追従できるようにする。
+export const DEFAULT_DESCRIPTOR_BODY_TEMPLATE = JSON.stringify(
+  { descriptor: "{{descriptor}}" },
+  null,
+  2,
+);
+export const DEFAULT_ATTENDANCE_BODY_TEMPLATE = JSON.stringify(
+  { userName: "{{username}}", name: "{{name}}", newStatus: "{{status}}" },
+  null,
+  2,
+);
+
 export interface AppSettings {
   theme: Theme;
   rebootSchedule: string;
   screenOffSchedule: string;
   getEndpoint: string;
+  // 顔特徴ベクトル登録 API(POST {postEndpoint}/{username})
   postEndpoint: string;
+  // 在室状況更新 API(POST {attendanceEndpoint})。descriptor 登録とは別のエンドポイント。
+  attendanceEndpoint: string;
   wsEndpoint: string;
   apiToken: string;
+  descriptorBodyTemplate: string;
+  attendanceBodyTemplate: string;
+  // WebSocket で届くシグナルのうち、どのフィールドがどの値になっていれば
+  // 「更新あり」とみなすか({ message: "update" } 以外の形式にも追従できるように)。
+  wsSignalField: string;
+  wsSignalValue: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -29,8 +52,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   screenOffSchedule: "",
   getEndpoint: "",
   postEndpoint: "",
+  attendanceEndpoint: "",
   wsEndpoint: "",
   apiToken: "",
+  descriptorBodyTemplate: DEFAULT_DESCRIPTOR_BODY_TEMPLATE,
+  attendanceBodyTemplate: DEFAULT_ATTENDANCE_BODY_TEMPLATE,
+  wsSignalField: "message",
+  wsSignalValue: "update",
 };
 
 const STORE_FILE = "settings.json";

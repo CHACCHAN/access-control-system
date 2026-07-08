@@ -69,6 +69,7 @@ export function FaceRegistrationOverlay({ onClose }: FaceRegistrationOverlayProp
         Array.from(detection.descriptor),
         settings.postEndpoint,
         settings.apiToken,
+        settings.descriptorBodyTemplate,
       );
       enroll(selectedUsername, detection.descriptor);
       setCaptureState("success");

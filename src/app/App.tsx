@@ -40,7 +40,7 @@ function MainScreen() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const lastFiredKeyRef = useRef<string | null>(null);
 
-  useKioskSocket(settings.wsEndpoint, refetch);
+  useKioskSocket(settings.wsEndpoint, refetch, settings.wsSignalField, settings.wsSignalValue);
 
   // 1分ごとに現在時刻をチェックし、再起動スケジュールと一致したら再起動する。
   // HH:MM は日をまたいで毎日同じ値になるため、発火済みかどうかは日付込みの

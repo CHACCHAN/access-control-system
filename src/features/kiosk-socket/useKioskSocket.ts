@@ -21,10 +21,16 @@ const DEV_MOCK_SIGNAL_INTERVAL_MS = 15000;
 export function useKioskSocket(
   wsEndpoint: string,
   onUpdateSignal: () => void,
+  signalField: string,
+  signalValue: string,
 ): UseKioskSocketResult {
   const [status, setStatus] = useState<KioskSocketStatus>("connecting");
   const onUpdateSignalRef = useRef(onUpdateSignal);
   onUpdateSignalRef.current = onUpdateSignal;
+  const signalFieldRef = useRef(signalField);
+  signalFieldRef.current = signalField;
+  const signalValueRef = useRef(signalValue);
+  signalValueRef.current = signalValue;
 
   useEffect(() => {
     if (import.meta.env.DEV) {
@@ -60,7 +66,7 @@ export function useKioskSocket(
         console.info(`[kiosk-socket] シグナル受信: ${event.data}`);
         try {
           const data = JSON.parse(event.data);
-          if (data?.message === "update") {
+          if (data?.[signalFieldRef.current] === signalValueRef.current) {
             onUpdateSignalRef.current();
           }
         } catch {

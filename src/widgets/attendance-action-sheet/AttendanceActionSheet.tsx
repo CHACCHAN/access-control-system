@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import type { AttendanceStatus } from "@/entities/member/api";
 import { useMembers } from "@/entities/member/MemberContext";
 import { ATTENDANCE_STATUSES, STATUS_STYLE } from "@/entities/member/statusStyle";
+import { useSettings } from "@/shared/hooks/useSettings";
 import { postAttendance } from "./api";
 import { CheckIcon, CloseIcon } from "@/shared/ui/icons";
 
 export function AttendanceActionSheet() {
   const { activeMember: member, clearSelection, updateStatus } = useMembers();
+  const { settings } = useSettings();
   const [pendingAction, setPendingAction] = useState<AttendanceStatus | null>(null);
   const [completedAction, setCompletedAction] = useState<AttendanceStatus | null>(null);
 
@@ -24,7 +26,14 @@ export function AttendanceActionSheet() {
     if (!member || pendingAction || completedAction || action === member.status) return;
     setPendingAction(action);
     try {
-      await postAttendance(member.username, action);
+      await postAttendance(
+        member.username,
+        member.name,
+        action,
+        settings.attendanceEndpoint,
+        settings.apiToken,
+        settings.attendanceBodyTemplate,
+      );
       updateStatus(member.username, action);
       setCompletedAction(action);
       setTimeout(clearSelection, 1100);
