@@ -1,3 +1,5 @@
+import { fetch } from "@tauri-apps/plugin-http";
+
 export type AttendanceStatus = "在室" | "外出" | "帰宅";
 
 export interface Member {
@@ -55,10 +57,26 @@ export async function fetchMembers(
     return DUMMY_MEMBERS;
   }
 
-  const response = await fetch(getEndpoint, {
-    headers: { Authorization: apiToken },
-  });
+  let response: Response;
+  try {
+    response = await fetch(getEndpoint, {
+      headers: { Authorization: apiToken },
+    });
+  } catch (err) {
+    // @tauri-apps/plugin-http の fetch は Rust(reqwest)側からリクエストするため
+    // ブラウザのCORS制約は受けない。ここに来るのはDNS解決失敗・TLSエラー・
+    // タイムアウト等、純粋なネットワーク/接続レベルの失敗。
+    console.error("[fetchMembers] 接続エラー:", err);
+    throw new Error(
+      `サーバーに接続できませんでした: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    console.error(
+      `[fetchMembers] HTTPエラー: status=${response.status} body=${body.slice(0, 200)}`,
+    );
     throw new Error(`メンバー一覧の取得に失敗しました: ${response.status}`);
   }
   return response.json();
@@ -70,12 +88,17 @@ export async function fetchMembers(
  */
 export async function checkMembersApiAlive(
   getEndpoint: string,
+  apiToken: string,
 ): Promise<boolean> {
   if (import.meta.env.DEV) return true;
   if (!getEndpoint) return false;
 
   try {
-    const response = await fetch(getEndpoint);
+    // fetchMembers と同じ Authorization ヘッダーを付けないと、認証必須の
+    // エンドポイントでは常に 401 になり実際の疎通状況を反映できない。
+    const response = await fetch(getEndpoint, {
+      headers: { Authorization: apiToken },
+    });
     return response.ok;
   } catch {
     return false;
@@ -100,7 +123,10 @@ export async function registerDescriptor(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiToken}`,
+      // fetchMembers / checkMembersApiAlive と同じく、設定画面には
+      // "Bearer xxx" の形で丸ごと入力してもらう運用のため、ここで "Bearer "
+      // を重ねて付けない(付けると "Bearer Bearer xxx" になってしまう)。
+      Authorization: apiToken,
     },
     body: JSON.stringify({ descriptor }),
   });

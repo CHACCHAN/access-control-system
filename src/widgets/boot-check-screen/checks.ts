@@ -50,7 +50,7 @@ export const BOOT_CHECKS: BootCheck[] = [
     label: "サーバー接続",
     run: () =>
       loadSettings().then(async (settings) => ({
-        ok: await checkMembersApiAlive(settings.getEndpoint),
+        ok: await checkMembersApiAlive(settings.getEndpoint, settings.apiToken),
       })),
   },
   {

@@ -6,6 +6,10 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "store:default"
+    "store:default",
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "https://*.chibatech.ac.jp/*" }]
+    }
   ]
 }

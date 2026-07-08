@@ -196,6 +196,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_http::init())
         .manage(camera_capture::CameraCaptureState::default())
         .invoke_handler(tauri::generate_handler![
             greet,
