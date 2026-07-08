@@ -1,6 +1,6 @@
 [package]
 name = "access-control-system"
-version = "0.2.10"
+version = "0.2.11"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -38,6 +38,10 @@ if-addrs = "0.15.0"
 [target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
 webkit2gtk = "=2.0.2"
 nokhwa = { version = "0.10", features = ["input-native"] }
+# nokhwa はデバイスのフォーマット列挙が空だと開けない(v4l2loopback 等)。
+# v4l で「現在の出力フォーマット」を直接照会し、Exact 要求で開くために使う。
+# nokhwa が内部で同バージョンを使用しているため依存追加コストはほぼ無い。
+v4l = "0.14"
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 base64 = "0.22"
 

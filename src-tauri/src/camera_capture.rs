@@ -97,7 +97,7 @@ pub fn stop_camera_capture(state: State<CameraCaptureState>) -> Result<(), Strin
 // (一致するものが無いと "Failed to Fulfill" で開けない)ため、MJPEG 決め打ちだと
 // YUYV しか提供しない仮想カメラ(v4l2loopback 等)で失敗する。実カメラで効率の
 // よい MJPEG から順に試し、最後はフォーマット不問の最高解像度にフォールバックする。
-fn format_candidates() -> Vec<(&'static str, RequestedFormat<'static>)> {
+fn format_candidates() -> Vec<(String, RequestedFormat<'static>)> {
     let closest = |fmt: FrameFormat| {
         RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(CameraFormat::new(
             Resolution::new(CAPTURE_WIDTH, CAPTURE_HEIGHT),
@@ -106,14 +106,64 @@ fn format_candidates() -> Vec<(&'static str, RequestedFormat<'static>)> {
         )))
     };
     vec![
-        ("MJPEG", closest(FrameFormat::MJPEG)),
-        ("YUYV", closest(FrameFormat::YUYV)),
-        ("NV12", closest(FrameFormat::NV12)),
+        ("MJPEG".to_string(), closest(FrameFormat::MJPEG)),
+        ("YUYV".to_string(), closest(FrameFormat::YUYV)),
+        ("NV12".to_string(), closest(FrameFormat::NV12)),
         (
-            "最高解像度(フォーマット不問)",
+            "最高解像度(フォーマット不問)".to_string(),
             RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestResolution),
         ),
     ]
+}
+
+// デバイスが「今」出力しているフォーマットを v4l2 の G_FMT / G_PARM で直接照会する。
+// v4l2loopback はフォーマット/フレームレート列挙に正しく応答しないことがあり、
+// その場合 nokhwa の列挙ベースの要求(Closest 等)は全滅する。列挙を介さない
+// Exact 要求を組み立てるための情報源として使う。
+struct ProbedFormat {
+    width: u32,
+    height: u32,
+    fourcc: String,
+    fps: u32,
+}
+
+fn probe_current_format(index: u32) -> Option<ProbedFormat> {
+    use v4l::video::Capture;
+
+    let device = v4l::Device::new(index as usize).ok()?;
+    let format = Capture::format(&device).ok()?;
+    let fps = Capture::params(&device)
+        .ok()
+        .and_then(|p| {
+            // interval は 1フレームあたりの時間(例: 1/30 秒 → 30fps)
+            if p.interval.numerator > 0 {
+                Some(p.interval.denominator / p.interval.numerator)
+            } else {
+                None
+            }
+        })
+        .filter(|fps| *fps > 0)
+        .unwrap_or(30);
+
+    Some(ProbedFormat {
+        width: format.width,
+        height: format.height,
+        fourcc: format.fourcc.str().ok()?.trim().to_string(),
+        fps,
+    })
+}
+
+// v4l2 の FourCC 文字列 → nokhwa の FrameFormat(nokhwa がデコードできるもののみ)
+fn fourcc_to_frame_format(fourcc: &str) -> Option<FrameFormat> {
+    match fourcc {
+        "YUYV" => Some(FrameFormat::YUYV),
+        "MJPG" => Some(FrameFormat::MJPEG),
+        "GREY" => Some(FrameFormat::GRAY),
+        "RGB3" => Some(FrameFormat::RAWRGB),
+        "BGR3" => Some(FrameFormat::RAWBGR),
+        "NV12" => Some(FrameFormat::NV12),
+        _ => None,
+    }
 }
 
 // システム上のカメラデバイスを列挙し、開けた最初のカメラを返す。
@@ -132,7 +182,37 @@ fn open_first_available_camera() -> Result<Camera, String> {
 
     let mut last_err = String::new();
     for info in &devices {
-        for (label, requested) in format_candidates() {
+        let mut candidates = format_candidates();
+
+        // 現在の出力フォーマットに完全一致する Exact 要求を最後の砦として足す。
+        // Exact はデバイスのフォーマット列挙を参照しない(nokhwa の実装上、要求を
+        // そのまま採用してデバイスの現在値と突き合わせるだけ)ため、列挙に正しく
+        // 応答しない v4l2loopback でも、現在値と一致していれば必ず開ける。
+        let probed = info.index().as_index().ok().and_then(probe_current_format);
+        if let Some(p) = &probed {
+            eprintln!(
+                "[camera-capture] {} の現在の出力: {} {}x{}@{}fps",
+                info.human_name(),
+                p.fourcc,
+                p.width,
+                p.height,
+                p.fps,
+            );
+            if let Some(frame_format) = fourcc_to_frame_format(&p.fourcc) {
+                candidates.push((
+                    format!("現在の出力({} {}x{}@{})", p.fourcc, p.width, p.height, p.fps),
+                    RequestedFormat::new::<RgbFormat>(RequestedFormatType::Exact(
+                        CameraFormat::new(
+                            Resolution::new(p.width, p.height),
+                            frame_format,
+                            p.fps,
+                        ),
+                    )),
+                ));
+            }
+        }
+
+        for (label, requested) in candidates {
             match Camera::new(info.index().clone(), requested) {
                 Ok(camera) => {
                     eprintln!(
@@ -149,6 +229,20 @@ fn open_first_available_camera() -> Result<Camera, String> {
                     );
                     last_err = format!("{} ({label}): {e}", info.human_name());
                 }
+            }
+        }
+
+        // どの候補でも開けず、かつ現在の出力がデコード非対応フォーマットだった場合は
+        // 原因をそのまま伝える(フィーダー側の設定変更で直せるため)。
+        if let Some(p) = &probed {
+            if fourcc_to_frame_format(&p.fourcc).is_none() {
+                last_err = format!(
+                    "{}: 出力フォーマット {} ({}x{}) は未対応です。仮想カメラのフィーダー側を YUYV / MJPG / NV12 等に変更してください",
+                    info.human_name(),
+                    p.fourcc,
+                    p.width,
+                    p.height,
+                );
             }
         }
     }
