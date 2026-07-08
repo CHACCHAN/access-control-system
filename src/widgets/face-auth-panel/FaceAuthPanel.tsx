@@ -50,7 +50,7 @@ export function FaceAuthPanel({ onOpenSettings }: FaceAuthPanelProps) {
   }
 
   return (
-    <section className="flex h-full flex-col gap-4 bg-linear-to-t from-indigo-100 via-white to-slate-50 p-6 dark:from-indigo-950 dark:via-indigo-950 dark:to-slate-950">
+    <section className="flex h-full min-h-0 flex-col gap-4 bg-linear-to-t from-indigo-100 via-white to-slate-50 p-6 dark:from-indigo-950 dark:via-indigo-950 dark:to-slate-950">
       <header className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">

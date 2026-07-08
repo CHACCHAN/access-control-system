@@ -10,7 +10,7 @@ export function MemberListPanel() {
   );
 
   return (
-    <section className="flex h-full flex-col gap-4 bg-slate-50 p-6 dark:bg-slate-950">
+    <section className="flex h-full min-h-0 flex-col gap-4 bg-slate-50 p-6 dark:bg-slate-950">
       <header>
         <h2 className="text-lg font-semibold text-slate-900 dark:text-white">メンバー</h2>
         <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -24,7 +24,7 @@ export function MemberListPanel() {
         </p>
       )}
 
-      <div className="grid flex-1 auto-rows-min grid-cols-2 gap-3 overflow-y-auto pr-1">
+      <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-3 overflow-y-auto pr-1">
         {isLoading &&
           Array.from({ length: 4 }).map((_, i) => (
             <div

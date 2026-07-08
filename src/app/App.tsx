@@ -64,7 +64,7 @@ function MainScreen() {
 
   return (
     <main className="h-screen w-screen bg-slate-100 dark:bg-slate-950">
-      <div className="grid h-full grid-cols-2 divide-x divide-slate-200 dark:divide-white/10">
+      <div className="grid h-full grid-cols-2 divide-x divide-slate-200 dark:divide-white/10 *:min-h-0">
         <MemberListPanel />
         <FaceAuthPanel onOpenSettings={() => setIsSettingsOpen(true)} />
       </div>
