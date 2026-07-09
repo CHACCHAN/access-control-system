@@ -36,3 +36,6 @@ src-tauri/target/
 
 # deb
 .deb
+
+# claude
+.claude
