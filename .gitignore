@@ -31,5 +31,8 @@ src-tauri/target/
 .env.local
 .env.*.local
 
-# Qwen3-TTS
-tts-server/models/*
+# onnx
+*onnx
+
+# deb
+.deb
