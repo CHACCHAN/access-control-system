@@ -31,7 +31,10 @@ src-tauri/target/
 .env.local
 .env.*.local
 
-# onnx
+# onnx (モデルファイル・ONNX Runtime共有ライブラリは大容量のためコミットしない。
+# devcontainer 初回起動時に .devcontainer/setup-models.sh がダウンロードする)
+src-tauri/resources/models/
+src-tauri/resources/onnxruntime/
 *onnx
 
 # deb

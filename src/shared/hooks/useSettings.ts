@@ -27,6 +27,22 @@ export const DEFAULT_ATTENDANCE_BODY_TEMPLATE = JSON.stringify(
   2,
 );
 
+// ジェスチャー(グー/チョキ/パー)に割り当てる在室ステータス。
+// 空文字は「割り当てなし(そのジェスチャーでは更新しない)」。
+// Rust側(detect_gesture コマンド)もこの設定を読んで room_status を返すため、
+// キー名(rock/scissors/paper)と既定値は src-tauri/src/vision/mod.rs と揃えること。
+export interface GestureStatusMap {
+  rock: string;
+  scissors: string;
+  paper: string;
+}
+
+export const DEFAULT_GESTURE_STATUS_MAP: GestureStatusMap = {
+  rock: "在室",
+  scissors: "外出",
+  paper: "帰宅",
+};
+
 export interface AppSettings {
   theme: Theme;
   rebootSchedule: string;
@@ -44,6 +60,8 @@ export interface AppSettings {
   // 「更新あり」とみなすか({ message: "update" } 以外の形式にも追従できるように)。
   wsSignalField: string;
   wsSignalValue: string;
+  // ジェスチャー認識(Rust側)の結果を在室ステータスへ変換するマッピング
+  gestureStatusMap: GestureStatusMap;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -59,6 +77,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   attendanceBodyTemplate: DEFAULT_ATTENDANCE_BODY_TEMPLATE,
   wsSignalField: "message",
   wsSignalValue: "update",
+  gestureStatusMap: DEFAULT_GESTURE_STATUS_MAP,
 };
 
 const STORE_FILE = "settings.json";
@@ -87,7 +106,17 @@ export async function loadSettings(): Promise<AppSettings> {
   try {
     const store = await getStore();
     const stored = await store.get<AppSettings>(SETTINGS_KEY);
-    return stored ? { ...DEFAULT_SETTINGS, ...stored } : DEFAULT_SETTINGS;
+    if (!stored) return DEFAULT_SETTINGS;
+    return {
+      ...DEFAULT_SETTINGS,
+      ...stored,
+      // ネストしたオブジェクトは浅いマージだと保存済みの値で丸ごと
+      // 置き換わり、後から追加したキーの既定値が失われるため個別にマージする
+      gestureStatusMap: {
+        ...DEFAULT_GESTURE_STATUS_MAP,
+        ...stored.gestureStatusMap,
+      },
+    };
   } catch {
     return DEFAULT_SETTINGS;
   }

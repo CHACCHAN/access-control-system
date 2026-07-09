@@ -25,20 +25,19 @@ interface FaceAuthPanelProps {
 
 export function FaceAuthPanel({ onOpenSettings }: FaceAuthPanelProps) {
   const { members, activeMember, selectMember } = useMembers();
-  const { mediaRef, mediaKind, cameraStatus, cameraError, faceApiReady, enrolledFaces } =
+  const { mediaRef, mediaKind, cameraStatus, cameraError, visionReady, enrolledFaces } =
     useFaceAuth();
   const [mode, setMode] = useState<"recognize" | "register">("recognize");
   const isPaused = activeMember !== null;
 
-  const { overlayCanvasRef, hint, matchedMember, dismissMatch } =
+  const { overlayCanvasRef, hint, isInferring, matchedMember, dismissMatch } =
     useFaceRecognitionLoop({
-      mediaRef,
       members,
       enrolledFaces,
       active:
         mode === "recognize" &&
         !isPaused &&
-        faceApiReady &&
+        visionReady &&
         cameraStatus === "streaming",
     });
 
@@ -93,6 +92,13 @@ export function FaceAuthPanel({ onOpenSettings }: FaceAuthPanelProps) {
 
         {mode === "recognize" && !matchedMember && !isPaused && (
           <div className="pointer-events-none absolute inset-6 rounded-2xl animate-pulse-ring" />
+        )}
+
+        {mode === "recognize" && isInferring && !matchedMember && (
+          <div className="pointer-events-none absolute right-4 top-4 flex items-center gap-2 rounded-full bg-slate-950/70 px-3 py-1.5 text-xs text-slate-200 backdrop-blur">
+            <span className="h-3 w-3 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
+            推論中
+          </div>
         )}
 
         {mode === "recognize" && hint && !matchedMember && (

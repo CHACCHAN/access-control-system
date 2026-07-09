@@ -34,7 +34,7 @@ function currentHHMM(): string {
 }
 
 function MainScreen() {
-  const { faceApiError } = useFaceAuth();
+  const { visionError } = useFaceAuth();
   const { settings } = useSettings();
   const { refetch } = useMembers();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -79,9 +79,9 @@ function MainScreen() {
 
       <SystemControlPanel />
 
-      {faceApiError && (
+      {visionError && (
         <p className="fixed bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-rose-100 px-4 py-2 text-xs text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
-          FaceAPI エラー: {faceApiError}
+          顔認証エンジン エラー: {visionError}
         </p>
       )}
 

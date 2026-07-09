@@ -1,5 +1,6 @@
+import { isTauri } from "@tauri-apps/api/core";
 import { checkMembersApiAlive } from "@/entities/member/api";
-import { loadFaceApiModels } from "@/shared/hooks/useFaceApiModels";
+import { initVision } from "@/shared/lib/visionApi";
 import { loadSettings } from "@/shared/hooks/useSettings";
 import {
   checkNetwork,
@@ -37,13 +38,19 @@ export const BOOT_CHECKS: BootCheck[] = [
     run: testDisplay,
   },
   {
-    id: "face-models",
-    label: "顔認証モデル",
-    run: () =>
-      loadFaceApiModels().then(
-        () => ({ ok: true }),
+    id: "vision-models",
+    label: "顔認証・ジェスチャーモデル",
+    run: () => {
+      // 推論はRust側(ONNX Runtime)で行う。ブラウザ単体実行(UI開発)では
+      // Rustバックエンドが存在しないため、他のハードウェアチェックと同様に省略する。
+      if (!isTauri()) {
+        return Promise.resolve({ ok: true, detail: "(ブラウザ実行のため省略)" });
+      }
+      return initVision().then(
+        () => ({ ok: true, detail: "ONNXモデルのロード完了" }),
         (err) => ({ ok: false, detail: err instanceof Error ? err.message : String(err) }),
-      ),
+      );
+    },
   },
   {
     id: "members-api",

@@ -35,6 +35,20 @@ struct CameraFramePayload {
     image_data: String,
 }
 
+/// 推論(顔認証・ジェスチャー認識)用に共有する最新のデコード済みフレーム。
+/// フロントへ送る JPEG とは別に、キャプチャスレッドが毎フレーム上書きする。
+/// 推論側はフロントの表示ペースと独立に「その時点の最新フレーム」を読む。
+pub struct LatestFrame {
+    pub width: u32,
+    pub height: u32,
+    /// RGB24 (len = width * height * 3)
+    pub rgb: Vec<u8>,
+    pub captured_at: Instant,
+}
+
+#[derive(Default, Clone)]
+pub struct SharedFrame(pub Arc<Mutex<Option<LatestFrame>>>);
+
 struct CaptureHandle {
     stop_flag: Arc<AtomicBool>,
     join_handle: JoinHandle<()>,
@@ -44,7 +58,11 @@ struct CaptureHandle {
 pub struct CameraCaptureState(Mutex<Option<CaptureHandle>>);
 
 #[tauri::command]
-pub fn start_camera_capture(app: AppHandle, state: State<CameraCaptureState>) -> Result<(), String> {
+pub fn start_camera_capture(
+    app: AppHandle,
+    state: State<CameraCaptureState>,
+    shared_frame: State<SharedFrame>,
+) -> Result<(), String> {
     let mut guard = state
         .0
         .lock()
@@ -65,7 +83,9 @@ pub fn start_camera_capture(app: AppHandle, state: State<CameraCaptureState>) ->
 
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
-    let join_handle = std::thread::spawn(move || run_capture_loop(&app, &thread_stop_flag));
+    let thread_shared_frame = shared_frame.inner().clone();
+    let join_handle =
+        std::thread::spawn(move || run_capture_loop(&app, &thread_stop_flag, &thread_shared_frame));
 
     *guard = Some(CaptureHandle {
         stop_flag,
@@ -249,7 +269,7 @@ fn open_first_available_camera() -> Result<Camera, String> {
     Err(format!("カメラを開けませんでした: {last_err}"))
 }
 
-fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>) {
+fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>, shared_frame: &SharedFrame) {
     let mut camera = match open_first_available_camera() {
         Ok(camera) => camera,
         Err(e) => {
@@ -275,7 +295,7 @@ fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>) {
     while !stop_flag.load(Ordering::SeqCst) {
         let loop_start = Instant::now();
 
-        match capture_and_encode_frame(&mut camera) {
+        match capture_and_encode_frame(&mut camera, shared_frame) {
             Ok(image_data) => {
                 consecutive_errors = 0;
                 let _ = app.emit("camera-frame", CameraFramePayload { image_data });
@@ -301,11 +321,26 @@ fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>) {
     }
 }
 
-fn capture_and_encode_frame(camera: &mut Camera) -> Result<String, String> {
+fn capture_and_encode_frame(
+    camera: &mut Camera,
+    shared_frame: &SharedFrame,
+) -> Result<String, String> {
     use base64::Engine;
 
     let frame = camera.frame().map_err(|e| e.to_string())?;
     let decoded = frame.decode_image::<RgbFormat>().map_err(|e| e.to_string())?;
+
+    // 推論(顔認証・ジェスチャー認識)用にデコード済みフレームを共有する。
+    // ロック中の処理はメモリコピーのみで、推論そのものはここでは行わない
+    // (推論はフロントからの Tauri command 契機で別スレッドが実行する)。
+    if let Ok(mut guard) = shared_frame.0.lock() {
+        *guard = Some(LatestFrame {
+            width: decoded.width(),
+            height: decoded.height(),
+            rgb: decoded.as_raw().clone(),
+            captured_at: Instant::now(),
+        });
+    }
 
     let mut jpeg_bytes = Vec::new();
     JpegEncoder::new_with_quality(&mut jpeg_bytes, JPEG_QUALITY)

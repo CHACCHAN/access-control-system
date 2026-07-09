@@ -1,15 +1,19 @@
 # access-control-system
 
-顔認証による在室管理アプリケーション。ブラウザ内(WASM)で動作する学習済みモデルを用いてカメラ映像から学生を特定し、在室・外出・帰宅の状態を管理する。
+顔認証による在室管理アプリケーション。カメラ映像から学生を特定し、在室・外出・帰宅の状態を管理する。ジェスチャー(グー/チョキ/パー)による在室ステータスの更新にも対応する。
 
-将来的に Tauri でデスクトップアプリ(Linux)として配布予定。開発は Web ブラウザ上で行い、最終確認のみ Tauri ビルドで行う。
+顔検出・顔認証・ジェスチャー認識の推論は全て Rust(Tauri backend)側の ONNX Runtime で実行する。フロントエンド(React)はカメラ映像の表示・推論中インジケータ・認識結果に応じたUI更新のみを担当する。
 
 ## 技術スタック
 
 - **フロントエンド**: React + TypeScript + Vite
 - **パッケージマネージャ**: Bun
 - **デスクトップアプリ化**: Tauri v2 (Rust)
-- **顔認識**: ONNX Runtime Web (YuNet / ArcFace)
+- **推論**: ONNX Runtime (`ort` クレート, load-dynamic) — CPU推論のみ
+  - 顔検出: SCRFD (`det_10g.onnx`)
+  - 顔アライメント: 106点ランドマーク (`2d106det.onnx`)
+  - 顔認証: ArcFace 512次元 embedding (`w600k_r50.onnx`)
+  - ジェスチャー: MediaPipe 手のひら検出 + 21点手指ランドマーク (OpenCV Zoo 変換モデル)
 
 ## 開発環境のセットアップ
 
@@ -46,6 +50,12 @@ git config --global credential.helper store
 
 コンテナ内には Rust、Bun、Tauri CLI、wasm-pack など開発に必要な一式が揃っています。
 
+初回起動時に `postCreateCommand` で `.devcontainer/setup-models.sh` が実行され、ONNX モデル(InsightFace buffalo_l / OpenCV Zoo)と ONNX Runtime 共有ライブラリ(`libonnxruntime.so`)が `src-tauri/resources/` 以下へダウンロードされます(既に存在する場合はスキップ)。手動で実行する場合:
+
+```bash
+bash .devcontainer/setup-models.sh
+```
+
 ### 4. 開発サーバーの起動
 
 ```bash
@@ -65,10 +75,12 @@ cargo tauri build
 
 ```
 access-control-system/
-├── src/              # React側のソースコード
+├── src/              # React側のソースコード(表示のみ。推論は行わない)
 ├── src-tauri/        # Tauriバックエンド(Rust)
-├── public/           # 静的ファイル・学習済みモデル(.onnx)
-└── .devcontainer/     # 開発コンテナ設定
+│   ├── src/vision/   # 顔認証・ジェスチャー認識の推論パイプライン
+│   └── resources/    # 学習済みモデル(.onnx)・libonnxruntime.so (Git管理外)
+├── public/           # 静的ファイル
+└── .devcontainer/    # 開発コンテナ設定・モデル取得スクリプト
 ```
 
 ## 環境変数

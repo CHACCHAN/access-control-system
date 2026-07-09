@@ -27,6 +27,14 @@
     "targets": [
       "deb"
     ],
+    "resources": [
+      "resources/models/buffalo_l/det_10g.onnx",
+      "resources/models/buffalo_l/2d106det.onnx",
+      "resources/models/buffalo_l/w600k_r50.onnx",
+      "resources/models/gesture/palm_detection_mediapipe_2023feb.onnx",
+      "resources/models/gesture/handpose_estimation_mediapipe_2023feb.onnx",
+      "resources/onnxruntime/libonnxruntime.so"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

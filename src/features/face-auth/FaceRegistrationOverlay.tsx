@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import * as faceapi from "@vladmandic/face-api";
 import { useMembers } from "@/entities/member/MemberContext";
 import { registerDescriptor } from "@/entities/member/api";
 import { useSettings } from "@/shared/hooks/useSettings";
+import { captureFaceEmbedding } from "@/shared/lib/visionApi";
 import { useFaceAuth } from "./FaceAuthContext";
 import { ArrowUpIcon, CheckIcon, CloseIcon, ScanFaceIcon } from "@/shared/ui/icons";
 
@@ -18,7 +18,7 @@ const IDLE_TIMEOUT_MS = 60_000;
 export function FaceRegistrationOverlay({ onClose }: FaceRegistrationOverlayProps) {
   const { members } = useMembers();
   const { settings } = useSettings();
-  const { mediaRef, faceApiReady, enroll } = useFaceAuth();
+  const { visionReady, enroll } = useFaceAuth();
   const [selectedUsername, setSelectedUsername] = useState(members[0]?.username ?? "");
   const [search, setSearch] = useState("");
   const [captureState, setCaptureState] = useState<CaptureState>("idle");
@@ -46,32 +46,24 @@ export function FaceRegistrationOverlay({ onClose }: FaceRegistrationOverlayProp
       setMessage("登録するメンバーを選択してください");
       return;
     }
-    const media = mediaRef.current;
-    if (!media || !faceApiReady) return;
+    if (!visionReady) return;
 
     setCaptureState("capturing");
     setMessage(null);
 
     try {
-      const detection = await faceapi
-        .detectSingleFace(media, new faceapi.TinyFaceDetectorOptions())
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-
-      if (!detection) {
-        setCaptureState("error");
-        setMessage("顔が検出できませんでした。カメラに正面を向けてください");
-        return;
-      }
+      // 顔検出〜embedding抽出はRust側で行う。顔が写っていない・小さすぎる
+      // 場合はメッセージ付きのエラーが返る。
+      const { embedding } = await captureFaceEmbedding();
 
       await registerDescriptor(
         selectedUsername,
-        Array.from(detection.descriptor),
+        embedding,
         settings.postEndpoint,
         settings.apiToken,
         settings.descriptorBodyTemplate,
       );
-      enroll(selectedUsername, detection.descriptor);
+      enroll(selectedUsername, embedding);
       setCaptureState("success");
       setMessage("顔情報を登録しました");
       setTimeout(onClose, 1200);
@@ -144,7 +136,7 @@ export function FaceRegistrationOverlay({ onClose }: FaceRegistrationOverlayProp
 
         <button
           onClick={handleCapture}
-          disabled={!faceApiReady || captureState === "capturing" || captureState === "success"}
+          disabled={!visionReady || captureState === "capturing" || captureState === "success"}
           className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-sky-500 py-3 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {captureState === "capturing" ? (

@@ -31,6 +31,20 @@ tauri-plugin-http = "2"
 sysinfo = "0.39.5"
 if-addrs = "0.15.0"
 
+# 顔検出・顔認証・ジェスチャー認識のONNX推論(全てRust側で完結させる)。
+# `load-dynamic` で libonnxruntime.so を実行時に dlopen する方式を採る:
+# - pyke CDN の静的リンク版は glibc 2.38+ を要求し、devcontainer
+#   (bookworm, glibc 2.36)でリンクできない
+# - Microsoft 公式リリースの .so は glibc 2.27+ で、bookworm でも
+#   本番機(Debian 13)でも動く
+# .so は .devcontainer/setup-models.sh が resources/onnxruntime/ に配置し、
+# deb にもリソースとして同梱する。CPU命令セットは実行時ディスパッチされる
+# ため、AVX2非対応の Ivy Bridge(本番機 i7-3770)でもそのまま動作する。
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "load-dynamic", "api-24"] }
+# ort へのテンソル受け渡しに使う。ort が依存する ndarray とバージョンを
+# 合わせる必要がある(0.17系)。
+ndarray = "0.17"
+
 # WebKitGTK 側のカメラ/マイク権限リクエスト(WebKitPermissionRequest)を
 # 明示的に許可するために使用。Tauri/wry がすでに同バージョンを依存グラフに
 # 含んでいるため、ここでバージョンを固定して型の一致を保証する。

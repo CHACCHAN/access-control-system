@@ -18,7 +18,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxdo-dev \
     patchelf \
     genisoimage \
+    libclang-dev \
+    libv4l-dev \
     && rm -rf /var/lib/apt/lists/*
+# libclang-dev / libv4l-dev: nokhwa(v4l2バインディング)のビルドに必要。
+# bindgen が libclang 経由で v4l2 ヘッダーを読む。
 
 # WASM Pack
 RUN rustup target add wasm32-unknown-unknown \

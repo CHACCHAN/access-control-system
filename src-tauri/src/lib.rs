@@ -2,6 +2,7 @@ use serde::Serialize;
 use sysinfo::{Disks, System};
 
 mod camera_capture;
+mod vision;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -198,6 +199,8 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_http::init())
         .manage(camera_capture::CameraCaptureState::default())
+        .manage(camera_capture::SharedFrame::default())
+        .manage(vision::VisionState::default())
         .invoke_handler(tauri::generate_handler![
             greet,
             shutdown_computer,
@@ -207,7 +210,12 @@ pub fn run() {
             get_system_spec,
             get_network_info,
             camera_capture::start_camera_capture,
-            camera_capture::stop_camera_capture
+            camera_capture::stop_camera_capture,
+            vision::init_vision,
+            vision::set_enrolled_faces,
+            vision::recognize_face,
+            vision::capture_face_embedding,
+            vision::detect_gesture
         ])
         .setup(|app| {
             #[cfg(target_os = "linux")]

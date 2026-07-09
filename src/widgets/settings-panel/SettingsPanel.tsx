@@ -1,7 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { useAppVersion } from "@/shared/hooks/useAppVersion";
-import { useSettings, type AppSettings } from "@/shared/hooks/useSettings";
+import {
+  useSettings,
+  type AppSettings,
+  type GestureStatusMap,
+} from "@/shared/hooks/useSettings";
+import { ATTENDANCE_STATUSES } from "@/entities/member/statusStyle";
 import {
   exitToShell,
   restartComputer,
@@ -20,6 +25,12 @@ const FIELD_CLASSES =
   "mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-sky-400 dark:border-white/10 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500";
 const LABEL_CLASSES =
   "mt-5 block text-xs font-medium text-slate-500 dark:text-slate-400";
+const GESTURE_FIELDS: { key: keyof GestureStatusMap; label: string }[] = [
+  { key: "rock", label: "✊ グー" },
+  { key: "scissors", label: "✌️ チョキ" },
+  { key: "paper", label: "✋ パー" },
+];
+
 const TOOL_BUTTON_CLASSES = (active: boolean) =>
   `rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
     active
@@ -188,6 +199,44 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               placeholder="wss://example.com/ws"
               className={FIELD_CLASSES}
             />
+
+            <p className={LABEL_CLASSES}>ジェスチャーの在室ステータス割り当て</p>
+            <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+              カメラに向けたジェスチャーで在室ステータスを更新します
+            </p>
+            <div className="mt-1.5 grid grid-cols-3 gap-2">
+              {GESTURE_FIELDS.map(({ key, label }) => (
+                <div key={key}>
+                  <label
+                    className="block text-center text-xs text-slate-500 dark:text-slate-400"
+                    htmlFor={`gesture-${key}`}
+                  >
+                    {label}
+                  </label>
+                  <select
+                    id={`gesture-${key}`}
+                    value={draft.gestureStatusMap[key]}
+                    onChange={(e) =>
+                      setDraft((d) => ({
+                        ...d,
+                        gestureStatusMap: {
+                          ...d.gestureStatusMap,
+                          [key]: e.target.value,
+                        },
+                      }))
+                    }
+                    className={`${FIELD_CLASSES} text-center`}
+                  >
+                    {ATTENDANCE_STATUSES.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                    <option value="">なし</option>
+                  </select>
+                </div>
+              ))}
+            </div>
 
             <label className={LABEL_CLASSES} htmlFor="api-token">
               APIトークン

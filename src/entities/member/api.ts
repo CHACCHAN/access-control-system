@@ -25,7 +25,9 @@ const DUMMY_MEMBERS: Member[] = Array.from({ length: DUMMY_MEMBER_COUNT }, (_, i
   return {
     username: `dummy.student${String(n).padStart(2, "0")}`,
     name: `ダミー ${n}号`,
-    descriptor: Array.from({ length: 128 }, () => Math.random() * 2 - 1),
+    // Rust側の照合はArcFaceの512次元embeddingのみ受け付ける。ランダム値
+    // なので実際の顔とは一致しない(「登録済みあり」のUI状態を作るためのもの)
+    descriptor: Array.from({ length: 512 }, () => Math.random() * 2 - 1),
     status: DUMMY_STATUSES[i % DUMMY_STATUSES.length],
   };
 });
