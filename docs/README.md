@@ -18,6 +18,7 @@
 | UI | [ui/screens.md](ui/screens.md) | 画面仕様(ブートチェック・トップ・設定) |
 | UI | [ui/design-customization.md](ui/design-customization.md) | テーマ・アクセントカラー・レイアウトのカスタマイズ |
 | 運用 | [system/kiosk-operations.md](system/kiosk-operations.md) | キオスク運用(再起動・消灯・終了・スケジュール) |
+| 運用 | [system/build-and-deploy.md](system/build-and-deploy.md) | ビルド(cargo tauri build)と実機アップデート(dpkg -i) |
 
 ## クレジット
 

@@ -63,13 +63,17 @@ bun install
 bun run dev
 ```
 
-ブラウザで `http://localhost:5173` を開いて確認します(ポートフォワードは自動設定済み)。カメラ機能を使う場合、`localhost` は HTTPS 制約の対象外なのでそのまま動作します。
+起動すると Vite のリンクがターミナルに表示されるので(`Local: http://localhost:xxxx/` の形式)、**ターミナルに表示されたリンク**をブラウザで開いて確認します(ポートフォワードは自動設定済み)。カメラ機能を使う場合、`localhost` は HTTPS 制約の対象外なのでそのまま動作します。
+
+なお `bun run dev` は Vite と同時に、外部 API への CORS 回避用の中継サーバー(既定: localhost:8787)も起動します。詳細は [docs/api/http-routing.md](docs/api/http-routing.md) を参照してください。
 
 ### 5. (任意) Tauri デスクトップアプリとしてビルド確認
 
 ```bash
 cargo tauri build
 ```
+
+ビルド成果物(deb)と実機へのアップデート手順は [docs/system/build-and-deploy.md](docs/system/build-and-deploy.md) を参照してください。
 
 ## ディレクトリ構成
 
@@ -83,16 +87,17 @@ access-control-system/
 └── .devcontainer/    # 開発コンテナ設定・モデル取得スクリプト
 ```
 
-## 環境変数
+## ドキュメント
 
-在室更新 API のトークンなど、秘匿情報は `.env` に記述します(Git 管理対象外)。プロジェクトルートに `.env.example` を用意しているので、これをコピーして値を埋めてください。
-
-```bash
-cp .env.example .env
-```
+アプリケーションの仕様書は [docs/](docs/README.md) にあります(仕様領域ごとにディレクトリ分け)。
+ビルド・実機アップデートの手順は [docs/system/build-and-deploy.md](docs/system/build-and-deploy.md) を参照してください。
 
 ## Recommended IDE Setup
 
 - [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
 
 拡張機能は `.devcontainer/devcontainer.json` に定義済みで、コンテナ起動時に自動インストールされます。
+
+## ライセンス
+
+MIT License([LICENSE](LICENSE))。作成者: Yuya Nakayama(中山裕哉 24G3102)
