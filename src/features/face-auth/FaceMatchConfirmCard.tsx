@@ -28,7 +28,7 @@ export function FaceMatchConfirmCard({ member, onConfirm, onReject }: FaceMatchC
           </button>
           <button
             onClick={onConfirm}
-            className="flex-1 rounded-lg bg-cyan-500 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(34,211,238,0.35)] transition hover:bg-cyan-400"
+            className="flex-1 rounded-lg bg-cyan-500 py-2.5 text-sm font-semibold text-slate-950 shadow-glow transition hover:bg-cyan-400"
           >
             はい
           </button>

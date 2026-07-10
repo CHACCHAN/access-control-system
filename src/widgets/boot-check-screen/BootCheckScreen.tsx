@@ -52,7 +52,7 @@ export function BootCheckScreen({ onContinue }: BootCheckScreenProps) {
         className="pointer-events-none absolute inset-x-0 top-0 h-72"
         style={{
           background:
-            "radial-gradient(60% 100% at 50% 0%, rgba(34,211,238,0.10), transparent 70%)",
+            "radial-gradient(60% 100% at 50% 0%, color-mix(in srgb, var(--color-cyan-400) 10%, transparent), transparent 70%)",
         }}
       />
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -82,7 +82,7 @@ export function BootCheckScreen({ onContinue }: BootCheckScreenProps) {
         {/* 進捗バー */}
         <div className="mt-4 h-1 overflow-hidden rounded-full bg-white/5">
           <div
-            className="h-full rounded-full bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.6)] transition-all duration-300"
+            className="h-full rounded-full bg-cyan-400 shadow-glow-bar transition-all duration-300"
             style={{ width: `${progress}%` }}
           />
         </div>

@@ -7,12 +7,6 @@ import { detectGesture, type GestureKind } from "@/shared/lib/visionApi";
 import { postAttendance } from "./api";
 import { CheckIcon, CloseIcon } from "@/shared/ui/icons";
 
-// ジェスチャー認識のポーリング間隔。このシート表示中は顔認証ループが
-// 停止しているため、CPU(i7-3770想定)を取り合うことはない。
-const GESTURE_POLL_INTERVAL_MS = 700;
-// 誤爆防止: 同じジェスチャーがこの回数連続したときだけステータスを更新する
-const GESTURE_STABLE_COUNT = 2;
-
 const GESTURE_EMOJI: Record<Exclude<GestureKind, "Unknown">, string> = {
   Rock: "✊",
   Scissors: "✌️",
@@ -22,6 +16,11 @@ const GESTURE_EMOJI: Record<Exclude<GestureKind, "Unknown">, string> = {
 export function AttendanceActionSheet() {
   const { activeMember: member, clearSelection, updateStatus } = useMembers();
   const { settings } = useSettings();
+  // ジェスチャー認識のポーリング間隔。このシート表示中は顔認証ループが
+  // 停止しているため、CPU(i7-3770想定)を取り合うことはない。
+  const gesturePollIntervalMs = Math.max(200, settings.performance.gesturePollIntervalMs || 700);
+  // 誤爆防止: 同じジェスチャーがこの回数連続したときだけステータスを更新する
+  const gestureStableCount = Math.max(1, Math.round(settings.performance.gestureStableCount) || 1);
   const [pendingAction, setPendingAction] = useState<AttendanceStatus | null>(null);
   const [completedAction, setCompletedAction] = useState<AttendanceStatus | null>(null);
   const [detectedGesture, setDetectedGesture] = useState<GestureKind | null>(null);
@@ -68,7 +67,7 @@ export function AttendanceActionSheet() {
         lastGesture = result.gesture;
 
         if (
-          streak >= GESTURE_STABLE_COUNT &&
+          streak >= gestureStableCount &&
           result.roomStatus &&
           (ATTENDANCE_STATUSES as string[]).includes(result.roomStatus)
         ) {
@@ -84,13 +83,13 @@ export function AttendanceActionSheet() {
       } finally {
         inFlight = false;
       }
-    }, GESTURE_POLL_INTERVAL_MS);
+    }, gesturePollIntervalMs);
 
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [member, busy]);
+  }, [member, busy, gesturePollIntervalMs, gestureStableCount]);
 
   if (!member) return null;
 

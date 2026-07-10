@@ -13,7 +13,9 @@ const FEED_CLASSES = "h-full w-full -scale-x-100 object-cover";
 
 export function CameraFeed({ mediaRef, mediaKind, status, error }: CameraFeedProps) {
   return (
-    <div className="absolute inset-0 overflow-hidden rounded-3xl bg-slate-950">
+    // 角丸はここでは付けない。丸めるのは配置先の親(overflow-hidden + rounded)の
+    // 責務で、ここで別の半径を付けると四隅で映像が余計に削られて枠とズレる。
+    <div className="absolute inset-0 overflow-hidden bg-slate-950">
       {mediaKind === "video" ? (
         <video
           ref={mediaRef as RefObject<HTMLVideoElement | null>}

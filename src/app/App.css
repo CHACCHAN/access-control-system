@@ -12,6 +12,90 @@
   /* サイバー装飾: スキャンライン走査・ネオングロー明滅 */
   --animate-scan: scan 7s linear infinite;
   --animate-glow: glow 2.6s ease-in-out infinite;
+
+  /* アクセント色に追従するネオングロー(旧: rgba(34,211,238,…) 固定値)。
+     shadow-glow / shadow-glow-sm / shadow-glow-bar ユーティリティとして使う。 */
+  --shadow-glow: 0 0 18px color-mix(in srgb, var(--color-cyan-400) 35%, transparent);
+  --shadow-glow-sm: 0 0 8px color-mix(in srgb, var(--color-cyan-400) 80%, transparent);
+  --shadow-glow-bar: 0 0 10px color-mix(in srgb, var(--color-cyan-400) 60%, transparent);
+}
+
+/*
+ * アクセントカラー。アプリ全体のアクセントは Tailwind の cyan 系ユーティリティ
+ * (text-cyan-400 等)で書かれており、Tailwind v4 ではそれらが CSS 変数
+ * (--color-cyan-*)を参照するため、変数を丸ごと別パレットに差し替えるだけで
+ * 全アクセントが一括で切り替わる。設定(appearance.accentColor)に応じて
+ * ThemeProvider が <html data-accent="..."> を付与する(cyan は既定なので属性なし)。
+ * 選択肢を増やす場合は useSettings.ts の AccentColor にも追加すること。
+ */
+:root[data-accent="emerald"] {
+  --color-cyan-50: #ecfdf5;
+  --color-cyan-100: #d1fae5;
+  --color-cyan-200: #a7f3d0;
+  --color-cyan-300: #6ee7b7;
+  --color-cyan-400: #34d399;
+  --color-cyan-500: #10b981;
+  --color-cyan-600: #059669;
+  --color-cyan-700: #047857;
+  --color-cyan-800: #065f46;
+  --color-cyan-900: #064e3b;
+  --color-cyan-950: #022c22;
+}
+
+:root[data-accent="violet"] {
+  --color-cyan-50: #f5f3ff;
+  --color-cyan-100: #ede9fe;
+  --color-cyan-200: #ddd6fe;
+  --color-cyan-300: #c4b5fd;
+  --color-cyan-400: #a78bfa;
+  --color-cyan-500: #8b5cf6;
+  --color-cyan-600: #7c3aed;
+  --color-cyan-700: #6d28d9;
+  --color-cyan-800: #5b21b6;
+  --color-cyan-900: #4c1d95;
+  --color-cyan-950: #2e1065;
+}
+
+:root[data-accent="rose"] {
+  --color-cyan-50: #fff1f2;
+  --color-cyan-100: #ffe4e6;
+  --color-cyan-200: #fecdd3;
+  --color-cyan-300: #fda4af;
+  --color-cyan-400: #fb7185;
+  --color-cyan-500: #f43f5e;
+  --color-cyan-600: #e11d48;
+  --color-cyan-700: #be123c;
+  --color-cyan-800: #9f1239;
+  --color-cyan-900: #881337;
+  --color-cyan-950: #4c0519;
+}
+
+:root[data-accent="amber"] {
+  --color-cyan-50: #fffbeb;
+  --color-cyan-100: #fef3c7;
+  --color-cyan-200: #fde68a;
+  --color-cyan-300: #fcd34d;
+  --color-cyan-400: #fbbf24;
+  --color-cyan-500: #f59e0b;
+  --color-cyan-600: #d97706;
+  --color-cyan-700: #b45309;
+  --color-cyan-800: #92400e;
+  --color-cyan-900: #78350f;
+  --color-cyan-950: #451a03;
+}
+
+:root[data-accent="blue"] {
+  --color-cyan-50: #eff6ff;
+  --color-cyan-100: #dbeafe;
+  --color-cyan-200: #bfdbfe;
+  --color-cyan-300: #93c5fd;
+  --color-cyan-400: #60a5fa;
+  --color-cyan-500: #3b82f6;
+  --color-cyan-600: #2563eb;
+  --color-cyan-700: #1d4ed8;
+  --color-cyan-800: #1e40af;
+  --color-cyan-900: #1e3a8a;
+  --color-cyan-950: #172554;
 }
 
 @keyframes fade-in {
@@ -49,13 +133,13 @@
   0%,
   100% {
     box-shadow:
-      inset 0 0 0 2px rgba(56, 189, 248, 0.55),
-      inset 0 0 20px rgba(56, 189, 248, 0.12);
+      inset 0 0 0 2px color-mix(in srgb, var(--color-cyan-400) 55%, transparent),
+      inset 0 0 20px color-mix(in srgb, var(--color-cyan-400) 12%, transparent);
   }
   50% {
     box-shadow:
-      inset 0 0 0 2px rgba(56, 189, 248, 0.95),
-      inset 0 0 36px rgba(56, 189, 248, 0.32);
+      inset 0 0 0 2px color-mix(in srgb, var(--color-cyan-400) 95%, transparent),
+      inset 0 0 36px color-mix(in srgb, var(--color-cyan-400) 32%, transparent);
   }
 }
 
@@ -91,18 +175,19 @@
   0%,
   100% {
     box-shadow:
-      0 0 0 1px rgba(34, 211, 238, 0.35),
-      0 0 12px rgba(34, 211, 238, 0.12);
+      0 0 0 1px color-mix(in srgb, var(--color-cyan-400) 35%, transparent),
+      0 0 12px color-mix(in srgb, var(--color-cyan-400) 12%, transparent);
   }
   50% {
     box-shadow:
-      0 0 0 1px rgba(34, 211, 238, 0.6),
-      0 0 20px rgba(34, 211, 238, 0.28);
+      0 0 0 1px color-mix(in srgb, var(--color-cyan-400) 60%, transparent),
+      0 0 20px color-mix(in srgb, var(--color-cyan-400) 28%, transparent);
   }
 }
 
-/* サイバー系の格子背景。設定ページのキャンバスに敷く。
-   ライトは薄いスレート、ダークは淡いシアンのグリッド。 */
+/* サイバー系の背景パターン。トップ画面・設定ページのキャンバスに敷く。
+   ライトは薄いスレート、ダークは淡いアクセント色。
+   設定(appearance.backgroundPattern)で grid / dots / diagonal / なし を選べる。 */
 .cyber-grid {
   background-image:
     linear-gradient(to right, rgba(100, 116, 139, 0.12) 1px, transparent 1px),
@@ -112,8 +197,40 @@
 
 .dark .cyber-grid {
   background-image:
-    linear-gradient(to right, rgba(34, 211, 238, 0.055) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(34, 211, 238, 0.055) 1px, transparent 1px);
+    linear-gradient(to right, color-mix(in srgb, var(--color-cyan-400) 5.5%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--color-cyan-400) 5.5%, transparent) 1px, transparent 1px);
+}
+
+.cyber-dots {
+  background-image: radial-gradient(rgba(100, 116, 139, 0.25) 1.2px, transparent 1.2px);
+  background-size: 26px 26px;
+}
+
+.dark .cyber-dots {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--color-cyan-400) 14%, transparent) 1.2px,
+    transparent 1.2px
+  );
+}
+
+.cyber-diagonal {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(100, 116, 139, 0.1) 0,
+    rgba(100, 116, 139, 0.1) 1px,
+    transparent 1px,
+    transparent 22px
+  );
+}
+
+.dark .cyber-diagonal {
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--color-cyan-400) 6%, transparent) 0,
+    color-mix(in srgb, var(--color-cyan-400) 6%, transparent) 1px,
+    transparent 1px,
+    transparent 22px
+  );
 }
 
 /* HUD 風の角マーカー(カード四隅にシアンの L 字を描く) */
@@ -126,7 +243,7 @@
   position: absolute;
   width: 10px;
   height: 10px;
-  border-color: rgba(34, 211, 238, 0.5);
+  border-color: color-mix(in srgb, var(--color-cyan-400) 50%, transparent);
   pointer-events: none;
 }
 .cyber-corners::before {

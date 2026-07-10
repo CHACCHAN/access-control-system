@@ -17,10 +17,10 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 
-const FRAME_INTERVAL: Duration = Duration::from_millis(100);
+// フレーム間隔と JPEG 品質は設定(settings.json の performance)で調整できる。
+// 既定値は crate::settings::PerfSettings::default() を参照。
 const CAPTURE_WIDTH: u32 = 640;
 const CAPTURE_HEIGHT: u32 = 480;
-const JPEG_QUALITY: u8 = 75;
 // カメラ(特に FaceTime HD 等)は open_stream() 直後の数フレームが真っ黒や
 // 露出未調整で返ってくることがあるため、最初の数フレームは捨てて自動露出が
 // 落ち着くのを待つ。捨てている間のフレーム取得エラーも無視する。
@@ -270,6 +270,15 @@ fn open_first_available_camera() -> Result<Camera, String> {
 }
 
 fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>, shared_frame: &SharedFrame) {
+    // 設定はキャプチャ開始時に一度だけ読む(設定保存時は端末ごと再起動する運用のため)
+    let perf = crate::settings::load_perf(app);
+    let frame_interval = Duration::from_millis(perf.camera_frame_interval_ms);
+    let jpeg_quality = perf.camera_jpeg_quality;
+    eprintln!(
+        "[camera-capture] フレーム間隔 {}ms / JPEG品質 {}",
+        perf.camera_frame_interval_ms, jpeg_quality
+    );
+
     let mut camera = match open_first_available_camera() {
         Ok(camera) => camera,
         Err(e) => {
@@ -295,7 +304,7 @@ fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>, shared_frame: 
     while !stop_flag.load(Ordering::SeqCst) {
         let loop_start = Instant::now();
 
-        match capture_and_encode_frame(&mut camera, shared_frame) {
+        match capture_and_encode_frame(&mut camera, shared_frame, jpeg_quality) {
             Ok(image_data) => {
                 consecutive_errors = 0;
                 let _ = app.emit("camera-frame", CameraFramePayload { image_data });
@@ -315,8 +324,8 @@ fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>, shared_frame: 
         }
 
         let elapsed = loop_start.elapsed();
-        if elapsed < FRAME_INTERVAL {
-            std::thread::sleep(FRAME_INTERVAL - elapsed);
+        if elapsed < frame_interval {
+            std::thread::sleep(frame_interval - elapsed);
         }
     }
 }
@@ -324,6 +333,7 @@ fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>, shared_frame: 
 fn capture_and_encode_frame(
     camera: &mut Camera,
     shared_frame: &SharedFrame,
+    jpeg_quality: u8,
 ) -> Result<String, String> {
     use base64::Engine;
 
@@ -343,7 +353,7 @@ fn capture_and_encode_frame(
     }
 
     let mut jpeg_bytes = Vec::new();
-    JpegEncoder::new_with_quality(&mut jpeg_bytes, JPEG_QUALITY)
+    JpegEncoder::new_with_quality(&mut jpeg_bytes, jpeg_quality)
         .encode_image(&decoded)
         .map_err(|e| e.to_string())?;
 

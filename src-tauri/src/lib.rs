@@ -2,6 +2,7 @@ use serde::Serialize;
 use sysinfo::{Disks, System};
 
 mod camera_capture;
+mod settings;
 mod vision;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/

@@ -1,16 +1,31 @@
 import { useMembers } from "@/entities/member/MemberContext";
 import { ATTENDANCE_STATUSES } from "@/entities/member/statusStyle";
+import { useSettings, type MemberListLayout } from "@/shared/hooks/useSettings";
 import { MemberCard } from "./MemberCard";
+
+// 設定(appearance.memberListLayout)→ 一覧コンテナのクラス
+const LAYOUT_CLASS: Record<MemberListLayout, string> = {
+  grid: "grid auto-rows-min grid-cols-2 gap-3",
+  compact: "grid auto-rows-min grid-cols-3 gap-2",
+  list: "flex flex-col gap-2",
+};
 
 export function MemberListPanel() {
   const { members, isLoading, error, activeMember, selectMember } = useMembers();
+  const { settings } = useSettings();
+  const layout = settings.appearance.memberListLayout;
+  const customBg = settings.appearance.memberPanelBg;
 
   const sortedMembers = [...members].sort(
     (a, b) => ATTENDANCE_STATUSES.indexOf(a.status) - ATTENDANCE_STATUSES.indexOf(b.status),
   );
 
   return (
-    <section className="flex h-full min-h-0 flex-col gap-4 bg-slate-50/60 p-6 dark:bg-transparent">
+    <section
+      className="flex h-full min-h-0 flex-col gap-4 bg-slate-50/60 p-6 dark:bg-transparent"
+      // background ショートハンドで既定のクラス指定(グラデーション含む)ごと上書きする
+      style={customBg ? { background: customBg } : undefined}
+    >
       <header className="flex items-end justify-between">
         <div>
           <p className="font-mono text-[10px] font-medium uppercase tracking-[0.25em] text-cyan-600/80 dark:text-cyan-400/70">
@@ -37,12 +52,14 @@ export function MemberListPanel() {
         </p>
       )}
 
-      <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-3 overflow-y-auto pr-1">
+      <div className={`min-h-0 flex-1 overflow-y-auto pr-1 ${LAYOUT_CLASS[layout] ?? LAYOUT_CLASS.grid}`}>
         {isLoading &&
           Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
-              className="h-28 animate-pulse rounded-xl border border-slate-200 bg-slate-200/60 dark:border-white/5 dark:bg-slate-800/40"
+              className={`animate-pulse rounded-xl border border-slate-200 bg-slate-200/60 dark:border-white/5 dark:bg-slate-800/40 ${
+                layout === "list" ? "h-16" : "h-28"
+              }`}
             />
           ))}
 
@@ -53,11 +70,12 @@ export function MemberListPanel() {
               member={member}
               isActive={member.username === activeMember?.username}
               onSelect={selectMember}
+              variant={layout === "list" ? "row" : "card"}
             />
           ))}
 
         {!isLoading && members.length === 0 && !error && (
-          <p className="col-span-2 py-8 text-center font-mono text-sm text-slate-400 dark:text-slate-500">
+          <p className="col-span-full py-8 text-center font-mono text-sm text-slate-400 dark:text-slate-500">
             メンバーが見つかりませんでした
           </p>
         )}

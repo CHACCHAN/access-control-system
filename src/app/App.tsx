@@ -11,7 +11,7 @@ import { useFaceAuth } from "@/features/face-auth/FaceAuthContext";
 import { useKioskSocket } from "@/features/kiosk-socket/useKioskSocket";
 import { ScreenDimmer } from "@/features/screen-dimmer/ScreenDimmer";
 import { useMembers } from "@/entities/member/MemberContext";
-import { useSettings } from "@/shared/hooks/useSettings";
+import { PATTERN_CLASS, useSettings } from "@/shared/hooks/useSettings";
 import "./App.css";
 
 export default function App() {
@@ -62,10 +62,14 @@ function MainScreen() {
     return () => window.clearInterval(timer);
   }, [settings.rebootSchedule]);
 
+  const patternClass = PATTERN_CLASS[settings.appearance.backgroundPattern] ?? "cyber-grid";
+
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-slate-50 dark:bg-[#070b14]">
-      {/* トップ画面全体にも設定ページと同じ格子背景を薄く敷き、統一感を出す */}
-      <div className="cyber-grid pointer-events-none absolute inset-0 opacity-60" />
+      {/* トップ画面全体にも設定ページと同じ背景パターンを薄く敷き、統一感を出す */}
+      {patternClass && (
+        <div className={`${patternClass} pointer-events-none absolute inset-0 opacity-60`} />
+      )}
       {/*
         grid-rows-[minmax(0,1fr)] が無いと、暗黙の行トラックは既定で「コンテンツに
         合わせて伸びるサイズ(auto)」になる。子要素に min-h-0 を付けるだけでは

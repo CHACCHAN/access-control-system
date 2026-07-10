@@ -22,13 +22,9 @@ use face::FaceEngine;
 use geometry::RgbBuf;
 use gesture::{Gesture, GestureEngine};
 
-/// 1:N 照合の類似度閾値(コサイン類似度)。仮値。実データで要調整。
-const MATCH_THRESHOLD: f32 = 0.5;
-/// 1位と2位の類似度差がこれ未満なら誤認識防止のため「該当者なし」にする。仮値。
-const MATCH_MARGIN: f32 = 0.05;
-/// 顔がフレーム幅に対してこの比率より小さい場合は embedding 抽出を
-/// 行わない(遠くの顔に高コストな認証をかけない)。
-const MIN_FACE_WIDTH_RATIO: f32 = 0.15;
+// 照合閾値・マージン・最小顔サイズ比率は設定(settings.json の performance)で
+// 調整できる。既定値は crate::settings::PerfSettings::default() を参照。
+
 /// キャプチャがこの時間より古いフレームしか持っていない場合は
 /// 「カメラ映像なし」として扱う(カメラ停止後の残像で推論しない)。
 const FRAME_STALE_MS: u128 = 3_000;
@@ -36,8 +32,7 @@ const FRAME_STALE_MS: u128 = 3_000;
 /// ジェスチャー→在室ステータスのマッピング設定。
 /// フロントエンドの設定(tauri-plugin-store の settings.json 内
 /// `settings.gestureStatusMap`)として永続化され、Rust 側はそれを参照する。
-const SETTINGS_STORE_FILE: &str = "settings.json";
-const SETTINGS_KEY: &str = "settings";
+use crate::settings::{SETTINGS_KEY, SETTINGS_STORE_FILE};
 const GESTURE_MAP_KEY: &str = "gestureStatusMap";
 
 /// デフォルトのマッピング(フロント側 DEFAULT_SETTINGS と揃えること)
@@ -219,6 +214,7 @@ pub async fn recognize_face(
 
     tauri::async_runtime::spawn_blocking(move || {
         state.ensure_loaded(&app)?;
+        let perf = crate::settings::load_perf(&app);
         let frame = latest_frame(&shared)?;
         let total_started = Instant::now();
 
@@ -255,7 +251,7 @@ pub async fn recognize_face(
 
         // 顔が小さすぎる(遠い)うちは高コストな照合はしない
         let face_width_ratio = (best.bbox[2] - best.bbox[0]) / frame.width as f32;
-        if face_width_ratio < MIN_FACE_WIDTH_RATIO {
+        if face_width_ratio < perf.min_face_width_ratio {
             return Ok(result);
         }
 
@@ -297,8 +293,8 @@ pub async fn recognize_face(
 
         if let Some((face, score)) = best_match {
             result.confidence = score;
-            let ambiguous = enrolled.len() > 1 && (score - second_score) < MATCH_MARGIN;
-            if score >= MATCH_THRESHOLD && !ambiguous {
+            let ambiguous = enrolled.len() > 1 && (score - second_score) < perf.match_margin;
+            if score >= perf.match_threshold && !ambiguous {
                 result.recognized = true;
                 result.user_id = Some(face.username.clone());
             }
@@ -331,6 +327,7 @@ pub async fn capture_face_embedding(
 
     tauri::async_runtime::spawn_blocking(move || {
         state.ensure_loaded(&app)?;
+        let perf = crate::settings::load_perf(&app);
         let frame = latest_frame(&shared)?;
 
         let mut engine_guard = state
@@ -346,7 +343,7 @@ pub async fn capture_face_embedding(
             .ok_or("顔が検出できませんでした。カメラに正面を向けてください")?;
 
         let face_width_ratio = (best.bbox[2] - best.bbox[0]) / frame.width as f32;
-        if face_width_ratio < MIN_FACE_WIDTH_RATIO {
+        if face_width_ratio < perf.min_face_width_ratio {
             return Err("顔が小さすぎます。もう少しカメラに近づいてください".to_string());
         }
 
@@ -542,7 +539,7 @@ mod tests {
             let cross_sim = face::cosine_similarity(&embedding, &other_embedding);
             eprintln!("別人間の類似度: {cross_sim:.3}");
             assert!(
-                cross_sim < MATCH_THRESHOLD,
+                cross_sim < crate::settings::PerfSettings::default().match_threshold,
                 "別人同士の類似度が閾値を超えています: {cross_sim}"
             );
         }

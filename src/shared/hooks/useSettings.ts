@@ -43,6 +43,78 @@ export const DEFAULT_GESTURE_STATUS_MAP: GestureStatusMap = {
   paper: "帰宅",
 };
 
+// パフォーマンス調整。推論のポーリング間隔やカメラ配信のパラメータを
+// 端末スペックに合わせて設定画面から調整できるようにする。
+// camera* / match* / minFaceWidthRatio は Rust 側も settings.json から読むため、
+// キー名と既定値は src-tauri/src/settings.rs と揃えること。
+export interface PerformanceSettings {
+  /** 顔認証(recognize_face)のポーリング間隔(ms) */
+  recognitionIntervalMs: number;
+  /** 同一人物がこの回数連続で認識されたら確認カードを出す(誤爆防止) */
+  recognitionStableCount: number;
+  /** ジェスチャー認識(detect_gesture)のポーリング間隔(ms) */
+  gesturePollIntervalMs: number;
+  /** 同じジェスチャーがこの回数連続したときだけステータスを更新する */
+  gestureStableCount: number;
+  /** Rust側: フロントへ base64 画像を送るフレーム間隔(ms)。100ms = 10fps */
+  cameraFrameIntervalMs: number;
+  /** Rust側: フロントへ送る JPEG の品質(1-100) */
+  cameraJpegQuality: number;
+  /** Rust側: 1:N照合の類似度閾値(コサイン類似度) */
+  matchThreshold: number;
+  /** Rust側: 1位と2位の類似度差がこれ未満なら「該当者なし」にする */
+  matchMargin: number;
+  /** Rust側: 顔幅がフレーム幅のこの比率未満なら照合しない */
+  minFaceWidthRatio: number;
+}
+
+export const DEFAULT_PERFORMANCE: PerformanceSettings = {
+  recognitionIntervalMs: 1000,
+  recognitionStableCount: 1,
+  gesturePollIntervalMs: 700,
+  gestureStableCount: 2,
+  cameraFrameIntervalMs: 100,
+  cameraJpegQuality: 75,
+  matchThreshold: 0.5,
+  matchMargin: 0.05,
+  minFaceWidthRatio: 0.15,
+};
+
+// デザインのカスタマイズ。アクセントカラーは Tailwind の cyan 系 CSS 変数を
+// 丸ごと差し替える方式(App.css の :root[data-accent=...])のため、
+// 追加する場合は App.css にも対応するパレットを足すこと。
+export type AccentColor = "cyan" | "emerald" | "violet" | "rose" | "amber" | "blue";
+export type BackgroundPattern = "grid" | "dots" | "diagonal" | "none";
+export type MemberListLayout = "grid" | "compact" | "list";
+
+// 背景パターン → 装飾クラス(App.css)の対応。トップ画面と設定画面で共用する。
+export const PATTERN_CLASS: Record<BackgroundPattern, string> = {
+  grid: "cyber-grid",
+  dots: "cyber-dots",
+  diagonal: "cyber-diagonal",
+  none: "",
+};
+
+export interface AppearanceSettings {
+  accentColor: AccentColor;
+  /** トップ画面と設定画面に敷く背景パターン */
+  backgroundPattern: BackgroundPattern;
+  /** メンバー一覧の並べ方(グリッド/3列コンパクト/1列リスト) */
+  memberListLayout: MemberListLayout;
+  /** トップ画面左(メンバー一覧)の背景色。空文字は既定のまま */
+  memberPanelBg: string;
+  /** トップ画面右(顔認証)の背景色。空文字は既定のまま */
+  authPanelBg: string;
+}
+
+export const DEFAULT_APPEARANCE: AppearanceSettings = {
+  accentColor: "cyan",
+  backgroundPattern: "grid",
+  memberListLayout: "grid",
+  memberPanelBg: "",
+  authPanelBg: "",
+};
+
 export interface AppSettings {
   theme: Theme;
   rebootSchedule: string;
@@ -62,6 +134,10 @@ export interface AppSettings {
   wsSignalValue: string;
   // ジェスチャー認識(Rust側)の結果を在室ステータスへ変換するマッピング
   gestureStatusMap: GestureStatusMap;
+  // 推論間隔・カメラ配信・照合パラメータの調整
+  performance: PerformanceSettings;
+  // アクセントカラー・背景・レイアウトのカスタマイズ
+  appearance: AppearanceSettings;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -78,6 +154,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   wsSignalField: "message",
   wsSignalValue: "update",
   gestureStatusMap: DEFAULT_GESTURE_STATUS_MAP,
+  performance: DEFAULT_PERFORMANCE,
+  appearance: DEFAULT_APPEARANCE,
 };
 
 const STORE_FILE = "settings.json";
@@ -115,6 +193,14 @@ export async function loadSettings(): Promise<AppSettings> {
       gestureStatusMap: {
         ...DEFAULT_GESTURE_STATUS_MAP,
         ...stored.gestureStatusMap,
+      },
+      performance: {
+        ...DEFAULT_PERFORMANCE,
+        ...stored.performance,
+      },
+      appearance: {
+        ...DEFAULT_APPEARANCE,
+        ...stored.appearance,
       },
     };
   } catch {

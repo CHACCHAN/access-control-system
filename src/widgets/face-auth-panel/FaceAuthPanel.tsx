@@ -11,6 +11,7 @@ import {
   type FaceScanHint,
 } from "@/features/face-auth/useFaceRecognitionLoop";
 import { GearIcon, ScanFaceIcon } from "@/shared/ui/icons";
+import { useSettings } from "@/shared/hooks/useSettings";
 
 const HINT_TEXT: Record<Exclude<FaceScanHint, null>, string> = {
   scanning: "顔を画面に近づけてください",
@@ -24,6 +25,8 @@ interface FaceAuthPanelProps {
 }
 
 export function FaceAuthPanel({ onOpenSettings }: FaceAuthPanelProps) {
+  const { settings } = useSettings();
+  const customBg = settings.appearance.authPanelBg;
   const { members, activeMember, selectMember } = useMembers();
   const { mediaRef, mediaKind, cameraStatus, cameraError, visionReady, enrolledFaces } =
     useFaceAuth();
@@ -49,7 +52,11 @@ export function FaceAuthPanel({ onOpenSettings }: FaceAuthPanelProps) {
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col gap-4 bg-linear-to-t from-cyan-50 via-white to-slate-50 p-6 dark:from-cyan-950/20 dark:via-transparent dark:to-transparent">
+    <section
+      className="flex h-full min-h-0 flex-col gap-4 bg-linear-to-t from-cyan-50 via-white to-slate-50 p-6 dark:from-cyan-950/20 dark:via-transparent dark:to-transparent"
+      // background ショートハンドで既定のグラデーションごと上書きする
+      style={customBg ? { background: customBg } : undefined}
+    >
       <header className="flex items-center justify-between">
         <div>
           <p className="font-mono text-[10px] font-medium uppercase tracking-[0.25em] text-cyan-600/80 dark:text-cyan-400/70">

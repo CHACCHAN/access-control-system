@@ -1,19 +1,24 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { useAppVersion } from "@/shared/hooks/useAppVersion";
-import { useSettings, type AppSettings } from "@/shared/hooks/useSettings";
+import { PATTERN_CLASS, useSettings, type AppSettings } from "@/shared/hooks/useSettings";
+import { applyAccentAttribute } from "@/shared/theme/ThemeContext";
 import { restartComputer } from "@/widgets/system-control-panel/api";
 import {
   ArrowLeftIcon,
   BracesIcon,
   CheckIcon,
+  GaugeIcon,
   HandIcon,
   LinkIcon,
+  PaletteIcon,
   ServerIcon,
   SlidersIcon,
   TerminalIcon,
 } from "@/shared/ui/icons";
 import { GeneralSection } from "./sections/GeneralSection";
+import { AppearanceSection } from "./sections/AppearanceSection";
+import { PerformanceSection } from "./sections/PerformanceSection";
 import { ConnectionSection } from "./sections/ConnectionSection";
 import { ApiBodySection } from "./sections/ApiBodySection";
 import { GestureSection } from "./sections/GestureSection";
@@ -24,7 +29,15 @@ interface SettingsPageProps {
   onClose: () => void;
 }
 
-type SectionId = "general" | "connection" | "apibody" | "gesture" | "logs" | "system";
+type SectionId =
+  | "general"
+  | "appearance"
+  | "performance"
+  | "connection"
+  | "apibody"
+  | "gesture"
+  | "logs"
+  | "system";
 
 interface IconType {
   ({ className }: { className?: string }): React.ReactNode;
@@ -32,6 +45,8 @@ interface IconType {
 
 const SECTIONS: { id: SectionId; label: string; en: string; icon: IconType }[] = [
   { id: "general", label: "一般", en: "GENERAL", icon: SlidersIcon },
+  { id: "appearance", label: "デザイン", en: "APPEARANCE", icon: PaletteIcon },
+  { id: "performance", label: "パフォーマンス", en: "PERFORMANCE", icon: GaugeIcon },
   { id: "connection", label: "API接続", en: "CONNECTION", icon: LinkIcon },
   { id: "apibody", label: "APIボディ", en: "REQUEST BODY", icon: BracesIcon },
   { id: "gesture", label: "ジェスチャー", en: "GESTURE", icon: HandIcon },
@@ -62,6 +77,20 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     setDraft(settings);
   }, [settings]);
 
+  // アクセントカラーは保存前でも編集中の値をライブプレビューする。
+  // 設定画面を閉じたら(保存の有無に関わらず)保存済みの値へ戻す。
+  const savedAccent = settings.appearance.accentColor;
+  const draftAccent = draft.appearance.accentColor;
+  useEffect(() => {
+    applyAccentAttribute(draftAccent);
+  }, [draftAccent]);
+  useEffect(() => {
+    return () => applyAccentAttribute(savedAccent);
+  }, [savedAccent]);
+
+  // 背景パターンも編集中の値でプレビュー(このページの背景に反映される)
+  const previewPattern = PATTERN_CLASS[draft.appearance.backgroundPattern] ?? "cyber-grid";
+
   // 編集内容が保存済みの設定と異なるか(未保存の変更があるか)
   const isDirty = JSON.stringify(draft) !== JSON.stringify(settings);
 
@@ -88,13 +117,15 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-50 text-slate-900 animate-page-in dark:bg-[#070b14] dark:text-slate-100">
-      {/* 背景装飾: 格子 + 上部のシアングロー + 走査線 */}
-      <div className="cyber-grid pointer-events-none absolute inset-0 opacity-70" />
+      {/* 背景装飾: 背景パターン(設定に追従) + 上部のアクセントグロー + 走査線 */}
+      {previewPattern && (
+        <div className={`${previewPattern} pointer-events-none absolute inset-0 opacity-70`} />
+      )}
       <div
         className="pointer-events-none absolute inset-x-0 top-0 h-64 opacity-60 dark:opacity-100"
         style={{
           background:
-            "radial-gradient(60% 100% at 50% 0%, rgba(34,211,238,0.10), transparent 70%)",
+            "radial-gradient(60% 100% at 50% 0%, color-mix(in srgb, var(--color-cyan-400) 10%, transparent), transparent 70%)",
         }}
       />
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -135,7 +166,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             type="submit"
             form="settings-form"
             disabled={isRestarting || (!isDirty && savedAt !== null)}
-            className="flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(34,211,238,0.35)] transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+            className="flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 shadow-glow transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
           >
             {isRestarting ? (
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />
@@ -167,7 +198,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
                 {/* アクティブ時の左端のネオンバー */}
                 <span
                   className={`absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-cyan-400 transition-opacity ${
-                    active ? "opacity-100 shadow-[0_0_8px_rgba(34,211,238,0.8)]" : "opacity-0"
+                    active ? "opacity-100 shadow-glow-sm" : "opacity-0"
                   }`}
                 />
                 <Icon className="h-5 w-5 shrink-0" />
@@ -191,6 +222,12 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           <div className="mx-auto max-w-2xl">
             {activeSection === "general" && (
               <GeneralSection draft={draft} setDraft={setDraft} />
+            )}
+            {activeSection === "appearance" && (
+              <AppearanceSection draft={draft} setDraft={setDraft} />
+            )}
+            {activeSection === "performance" && (
+              <PerformanceSection draft={draft} setDraft={setDraft} />
             )}
             {activeSection === "connection" && (
               <ConnectionSection draft={draft} setDraft={setDraft} />

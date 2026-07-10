@@ -84,6 +84,28 @@ export function SystemSection() {
             )}
           </div>
         </div>
+
+        {/* クレジット */}
+        <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3 dark:border-white/10 dark:bg-slate-950/40">
+          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.2em] text-cyan-600/80 dark:text-cyan-400/70">
+            credits
+          </p>
+          <div className="mt-2 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-500 dark:text-slate-400">作成者</span>
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                中山裕哉 <span className="font-mono text-xs text-slate-500 dark:text-slate-400">24G3102</span>
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-500 dark:text-slate-400">ライセンス</span>
+              <span className="font-mono text-xs text-slate-700 dark:text-slate-200">MIT License</span>
+            </div>
+          </div>
+          <p className="mt-2.5 border-t border-slate-200 pt-2 text-[11px] leading-relaxed text-slate-400 dark:border-white/5 dark:text-slate-500">
+            本ソフトウェアは MIT ライセンスの下で提供されます。ソフトウェアは「現状のまま」提供され、明示または黙示を問わずいかなる保証もありません。
+          </p>
+        </div>
       </div>
     </SettingsCard>
   );

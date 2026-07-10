@@ -142,7 +142,7 @@ export function FaceRegistrationOverlay({ onClose }: FaceRegistrationOverlayProp
         <button
           onClick={handleCapture}
           disabled={!visionReady || captureState === "capturing" || captureState === "success"}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-500 py-3 text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(34,211,238,0.35)] transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-500 py-3 text-sm font-semibold text-slate-950 shadow-glow transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
         >
           {captureState === "capturing" ? (
             <>
