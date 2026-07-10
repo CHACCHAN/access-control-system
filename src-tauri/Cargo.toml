@@ -2,7 +2,8 @@
 name = "access-control-system"
 version = "0.2.21"
 description = "A Tauri App"
-authors = ["you"]
+authors = ["Yuya Nakayama"]
+license = "MIT"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
