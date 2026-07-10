@@ -86,18 +86,23 @@ export function FaceRegistrationOverlay({ onClose }: FaceRegistrationOverlayProp
       {captureState !== "success" && (
         <div className="pointer-events-none fixed inset-x-0 top-8 z-50 flex justify-center animate-fade-in">
           <div className="flex flex-col items-center gap-3">
-            <ArrowUpIcon className="h-14 w-14 animate-bounce text-sky-500 dark:text-sky-400" />
-            <p className="rounded-full bg-white/90 px-6 py-2.5 text-lg font-semibold text-slate-700 shadow-lg backdrop-blur dark:bg-slate-950/80 dark:text-slate-200">
+            <ArrowUpIcon className="h-14 w-14 animate-bounce text-cyan-500 dark:text-cyan-400" />
+            <p className="rounded-lg border border-slate-200/50 bg-white/90 px-6 py-2.5 text-lg font-semibold text-slate-700 shadow-lg backdrop-blur dark:border-cyan-400/20 dark:bg-slate-950/80 dark:text-slate-200">
               カメラを見てください
             </p>
           </div>
         </div>
       )}
 
-      <div className="animate-slide-up rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-2xl backdrop-blur dark:border-white/10 dark:bg-slate-900/90">
-        <div className="flex items-center gap-2 text-slate-900 dark:text-slate-200">
-          <ScanFaceIcon className="h-5 w-5 text-sky-500 dark:text-sky-400" />
-          <h3 className="text-base font-semibold">新しい顔を登録する</h3>
+      <div className="cyber-corners animate-slide-up rounded-xl border border-slate-200 bg-white/90 p-6 shadow-2xl backdrop-blur dark:border-cyan-400/20 dark:bg-slate-900/90">
+        <div className="flex items-center gap-2.5 text-slate-900 dark:text-slate-200">
+          <ScanFaceIcon className="h-5 w-5 text-cyan-500 dark:text-cyan-400" />
+          <div>
+            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.25em] text-cyan-600/80 dark:text-cyan-400/70">
+              enroll
+            </p>
+            <h3 className="text-base font-semibold leading-tight">新しい顔を登録する</h3>
+          </div>
         </div>
 
         <label className="mt-4 block text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -108,10 +113,10 @@ export function FaceRegistrationOverlay({ onClose }: FaceRegistrationOverlayProp
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="名前・ユーザー名で検索"
-          className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-sky-400 dark:border-white/10 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
+          className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 dark:border-white/10 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-cyan-400 dark:focus:ring-cyan-400/15"
         />
 
-        <div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-slate-800/60">
+        <div className="mt-2 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-slate-950/40">
           {filteredMembers.length === 0 && (
             <p className="px-3 py-3 text-xs text-slate-400 dark:text-slate-500">
               該当するメンバーが見つかりません
@@ -124,12 +129,12 @@ export function FaceRegistrationOverlay({ onClose }: FaceRegistrationOverlayProp
               onClick={() => setSelectedUsername(m.username)}
               className={`flex w-full items-center justify-between px-3 py-2.5 text-left text-sm transition ${
                 m.username === selectedUsername
-                  ? "bg-sky-500/15 text-sky-700 dark:text-sky-300"
+                  ? "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300"
                   : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-white/5"
               }`}
             >
               <span>{m.name}</span>
-              <span className="text-xs text-slate-400 dark:text-slate-500">@{m.username}</span>
+              <span className="font-mono text-xs text-slate-400 dark:text-slate-500">@{m.username}</span>
             </button>
           ))}
         </div>
@@ -137,7 +142,7 @@ export function FaceRegistrationOverlay({ onClose }: FaceRegistrationOverlayProp
         <button
           onClick={handleCapture}
           disabled={!visionReady || captureState === "capturing" || captureState === "success"}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-sky-500 py-3 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-500 py-3 text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(34,211,238,0.35)] transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
         >
           {captureState === "capturing" ? (
             <>

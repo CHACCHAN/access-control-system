@@ -4,7 +4,7 @@
     "dockerfile": "Dockerfile",
     "context": "."
   },
-  "forwardPorts": [5173, 8080],
+  "forwardPorts": [1420, 5173, 8080, 8787],
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=/home/dev/workspace/cit/access-control-system,target=/workspace,type=bind,consistency=cached",
   "mounts": [

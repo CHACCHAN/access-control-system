@@ -1,7 +1,7 @@
-// この fetch() は @tauri-apps/plugin-http のものを使う(グローバルの
-// window.fetch を上書きしている)。Rust(reqwest)側からリクエストするため
-// ブラウザのCORS制約を受けない(entities/member/api.ts と同じ理由)。
-import { fetch } from "@tauri-apps/plugin-http";
+// 在室状況更新の API 呼び出し。fetch は shared/lib/httpClient の httpFetch を
+// 使い、実機(Tauri)では Rust(reqwest)経由・開発時(ブラウザ)ではブラウザ標準の
+// fetch で、いずれも設定画面に入力したエンドポイントへ実際に通信する。
+import { httpFetch } from "@/shared/lib/httpClient";
 import type { AttendanceStatus } from "@/entities/member/api";
 import { applyBodyTemplate } from "@/shared/lib/apiBodyTemplate";
 
@@ -15,20 +15,18 @@ export async function postAttendance(
   apiToken: string,
   bodyTemplate: string,
 ): Promise<{ success: true }> {
-  if (import.meta.env.DEV) {
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    console.log("[開発者モード] 在室状況更新(送信スキップ)", { username, name, action });
-    return { success: true };
+  if (!attendanceEndpoint) {
+    throw new Error("在室状況更新APIが未設定です。設定画面で入力してください");
   }
 
   const body = applyBodyTemplate(bodyTemplate, { username, name, status: action });
   console.log(`[postAttendance] POST ${attendanceEndpoint}`, body);
-  const response = await fetch(attendanceEndpoint, {
+  const response = await httpFetch(attendanceEndpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      // entities/member/api.ts と同じく、設定画面には "Bearer xxx" の形で
-      // 丸ごと入力してもらう運用のため、ここで "Bearer " を重ねて付けない。
+      // 設定画面には "Bearer xxx" の形で丸ごと入力してもらう運用のため、
+      // ここで "Bearer " を重ねて付けない。
       Authorization: apiToken,
     },
     body: JSON.stringify(body),

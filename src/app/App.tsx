@@ -5,7 +5,7 @@ import { AttendanceActionSheet } from "@/widgets/attendance-action-sheet/Attenda
 import { SystemControlPanel } from "@/widgets/system-control-panel/SystemControlPanel";
 import { restartComputer } from "@/widgets/system-control-panel/api";
 import { BootCheckScreen } from "@/widgets/boot-check-screen/BootCheckScreen";
-import { SettingsPanel } from "@/widgets/settings-panel/SettingsPanel";
+import { SettingsPage } from "@/widgets/settings-page/SettingsPage";
 import { AppProviders } from "./providers/AppProviders";
 import { useFaceAuth } from "@/features/face-auth/FaceAuthContext";
 import { useKioskSocket } from "@/features/kiosk-socket/useKioskSocket";
@@ -63,7 +63,9 @@ function MainScreen() {
   }, [settings.rebootSchedule]);
 
   return (
-    <main className="h-screen w-screen bg-slate-100 dark:bg-slate-950">
+    <main className="relative h-screen w-screen overflow-hidden bg-slate-50 dark:bg-[#070b14]">
+      {/* トップ画面全体にも設定ページと同じ格子背景を薄く敷き、統一感を出す */}
+      <div className="cyber-grid pointer-events-none absolute inset-0 opacity-60" />
       {/*
         grid-rows-[minmax(0,1fr)] が無いと、暗黙の行トラックは既定で「コンテンツに
         合わせて伸びるサイズ(auto)」になる。子要素に min-h-0 を付けるだけでは
@@ -72,7 +74,7 @@ function MainScreen() {
         「コンテナの高さちょうど・下限0(縮小可)」にし、はみ出た分は各パネル内部の
         overflow-y-auto に処理させる。
       */}
-      <div className="grid h-full grid-cols-2 grid-rows-[minmax(0,1fr)] divide-x divide-slate-200 dark:divide-white/10 *:min-h-0">
+      <div className="relative z-10 grid h-full grid-cols-2 grid-rows-[minmax(0,1fr)] divide-x divide-slate-200 dark:divide-cyan-400/10 *:min-h-0">
         <MemberListPanel />
         <FaceAuthPanel onOpenSettings={() => setIsSettingsOpen(true)} />
       </div>
@@ -80,14 +82,14 @@ function MainScreen() {
       <SystemControlPanel />
 
       {visionError && (
-        <p className="fixed bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-rose-100 px-4 py-2 text-xs text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
-          顔認証エンジン エラー: {visionError}
+        <p className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 font-mono text-xs text-rose-600 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-400">
+          [vision] {visionError}
         </p>
       )}
 
       <AttendanceActionSheet />
 
-      {isSettingsOpen && <SettingsPanel onClose={() => setIsSettingsOpen(false)} />}
+      {isSettingsOpen && <SettingsPage onClose={() => setIsSettingsOpen(false)} />}
 
       <ScreenDimmer />
     </main>

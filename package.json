@@ -4,7 +4,8 @@
   "version": "0.2.21",
   "type": "module",
   "scripts": {
-    "dev": "vite --host",
+    "dev": "bun run scripts/dev.ts",
+    "dev:vite": "vite --host",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri"

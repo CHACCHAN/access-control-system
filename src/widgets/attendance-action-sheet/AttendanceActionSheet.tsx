@@ -125,22 +125,22 @@ export function AttendanceActionSheet() {
   ).filter(([, status]) => status !== "");
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm animate-fade-in dark:bg-slate-950/70">
-      <div className="relative w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-8 shadow-2xl animate-scale-in dark:border-white/10 dark:bg-slate-900 dark:shadow-black/40">
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm animate-fade-in dark:bg-[#070b14]/80">
+      <div className="cyber-corners relative w-full max-w-sm rounded-xl border border-slate-200 bg-white p-8 shadow-2xl animate-scale-in dark:border-cyan-400/20 dark:bg-slate-900 dark:shadow-black/40">
         <button
           onClick={clearSelection}
-          className="absolute right-4 top-4 rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
+          className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
           aria-label="閉じる"
         >
           <CloseIcon className="h-5 w-5" />
         </button>
 
         <div className="flex flex-col items-center gap-1 text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-linear-to-br from-indigo-500 to-sky-500 text-2xl font-semibold text-white shadow-lg shadow-indigo-500/30">
+          <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-linear-to-br from-cyan-500 to-indigo-500 text-2xl font-semibold text-white shadow-lg shadow-cyan-500/30">
             {member.name.slice(0, 1)}
           </div>
           <p className="mt-3 text-lg font-semibold text-slate-900 dark:text-white">{member.name}</p>
-          <p className="text-sm text-slate-500 dark:text-slate-400">@{member.username}</p>
+          <p className="font-mono text-sm text-slate-500 dark:text-slate-400">@{member.username}</p>
         </div>
 
         {completedAction ? (
@@ -167,7 +167,7 @@ export function AttendanceActionSheet() {
                     key={action}
                     onClick={() => handleAction(action)}
                     disabled={isDisabled}
-                    className={`flex flex-col items-center gap-2 rounded-2xl px-2 py-4 text-xs font-medium ring-1 ring-inset transition disabled:cursor-not-allowed ${
+                    className={`flex flex-col items-center gap-2 rounded-xl px-2 py-4 text-xs font-medium ring-1 ring-inset transition disabled:cursor-not-allowed ${
                       isCurrent
                         ? "bg-slate-100 text-slate-400 ring-slate-200 dark:bg-slate-800/60 dark:text-slate-500 dark:ring-white/5"
                         : `${style.actionClasses} disabled:opacity-40`
@@ -188,9 +188,9 @@ export function AttendanceActionSheet() {
             </div>
 
             {gestureLegend.length > 0 && (
-              <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-800/60">
-                <p className="text-center text-[11px] text-slate-400 dark:text-slate-500">
-                  カメラにジェスチャーを向けても選択できます
+              <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3 dark:border-white/10 dark:bg-slate-950/40">
+                <p className="text-center font-mono text-[10px] uppercase tracking-wider text-cyan-600/70 dark:text-cyan-400/60">
+                  gesture control
                 </p>
                 <div className="mt-1.5 flex justify-center gap-4">
                   {gestureLegend.map(([gesture, status]) => (
@@ -198,7 +198,7 @@ export function AttendanceActionSheet() {
                       key={gesture}
                       className={`text-xs transition ${
                         detectedGesture === gesture
-                          ? "scale-110 font-semibold text-sky-600 dark:text-sky-400"
+                          ? "scale-110 font-semibold text-cyan-600 dark:text-cyan-400"
                           : "text-slate-500 dark:text-slate-400"
                       }`}
                     >

@@ -8,15 +8,14 @@ interface UseKioskSocketResult {
 
 // 切断時に再接続を試みるまでの間隔
 const RECONNECT_DELAY_MS = 5000;
-// 開発者モードで擬似的に更新シグナルを発火する間隔
-const DEV_MOCK_SIGNAL_INTERVAL_MS = 15000;
 
 /**
  * キオスク端末向けの WebSocket クライアント。サーバーから更新シグナルを
  * 受信するたびに onUpdateSignal を呼び出す(実際のメンバー一覧再取得は
  * 呼び出し側が担う)。接続が切れた場合は一定間隔で再接続を試みる。
  *
- * 開発者モードでは実際には接続せず、一定間隔でシグナルを擬似発火する。
+ * WebSocket はブラウザ標準 API のため、実機・開発時(ブラウザ)を問わず
+ * 設定画面で入力したエンドポイントへ実際に接続する。
  */
 export function useKioskSocket(
   wsEndpoint: string,
@@ -33,15 +32,6 @@ export function useKioskSocket(
   signalValueRef.current = signalValue;
 
   useEffect(() => {
-    if (import.meta.env.DEV) {
-      setStatus("connected");
-      const timer = window.setInterval(() => {
-        console.info("[開発者モード] WebSocket 更新シグナルを擬似発火");
-        onUpdateSignalRef.current();
-      }, DEV_MOCK_SIGNAL_INTERVAL_MS);
-      return () => window.clearInterval(timer);
-    }
-
     if (!wsEndpoint) {
       setStatus("disconnected");
       return;

@@ -47,10 +47,10 @@ export function SystemControlPanel() {
           onClick={() => setIsExpanded((prev) => !prev)}
           aria-label="電源メニューを開く"
           aria-expanded={isExpanded}
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition ${
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border shadow-sm transition ${
             isExpanded
-              ? "border-slate-300 bg-slate-100 text-slate-700 dark:border-white/20 dark:bg-slate-700 dark:text-white"
-              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700"
+              ? "border-cyan-400/50 bg-cyan-500/10 text-cyan-600 dark:text-cyan-300"
+              : "border-slate-200 bg-white text-slate-600 hover:border-cyan-400/50 hover:text-cyan-600 dark:border-white/10 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-cyan-400/50 dark:hover:text-cyan-300"
           }`}
         >
           {isExpanded ? (
@@ -67,14 +67,14 @@ export function SystemControlPanel() {
         >
           <button
             onClick={() => setPendingAction("restart")}
-            className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-100 dark:border-white/10 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700"
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 text-xs font-medium text-slate-600 shadow-sm transition hover:border-cyan-400/50 hover:text-cyan-600 dark:border-white/10 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-cyan-400/50 dark:hover:text-cyan-300"
           >
             <RestartIcon className="h-4 w-4" />
             再起動
           </button>
           <button
             onClick={() => setPendingAction("shutdown")}
-            className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-rose-200 bg-white px-3.5 text-xs font-medium text-rose-600 shadow-sm transition hover:bg-rose-50 dark:border-rose-500/20 dark:bg-slate-800/80 dark:text-rose-400 dark:hover:bg-rose-500/10"
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3.5 text-xs font-medium text-rose-600 shadow-sm transition hover:bg-rose-50 dark:border-rose-500/25 dark:bg-slate-800/60 dark:text-rose-400 dark:hover:bg-rose-500/10"
           >
             <PowerIcon className="h-4 w-4" />
             シャットダウン
@@ -83,18 +83,21 @@ export function SystemControlPanel() {
       </div>
 
       {pendingAction && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm animate-fade-in dark:bg-slate-950/70">
-          <div className="relative w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-2xl animate-scale-in dark:border-white/10 dark:bg-slate-900">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm animate-fade-in dark:bg-[#070b14]/80">
+          <div className="cyber-corners relative w-full max-w-sm rounded-xl border border-slate-200 bg-white p-8 text-center shadow-2xl animate-scale-in dark:border-rose-500/25 dark:bg-slate-900">
             <button
               onClick={closeDialog}
               disabled={isExecuting}
-              className="absolute right-4 top-4 rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
+              className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
               aria-label="閉じる"
             >
               <CloseIcon className="h-5 w-5" />
             </button>
 
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-rose-500/10 text-rose-500 dark:text-rose-400">
+            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.25em] text-rose-500 dark:text-rose-400">
+              danger zone
+            </p>
+            <div className="mx-auto mt-2 flex h-14 w-14 items-center justify-center rounded-xl bg-rose-500/10 text-rose-500 dark:text-rose-400">
               {pendingAction === "shutdown" ? (
                 <PowerIcon className="h-7 w-7" />
               ) : (
@@ -108,20 +111,20 @@ export function SystemControlPanel() {
               このコンピュータが{pendingAction === "shutdown" ? "電源オフになります" : "再起動します"}
             </p>
 
-            {error && <p className="mt-3 text-xs text-rose-600 dark:text-rose-400">{error}</p>}
+            {error && <p className="mt-3 font-mono text-xs text-rose-600 dark:text-rose-400">{error}</p>}
 
             <div className="mt-6 flex gap-3">
               <button
                 onClick={closeDialog}
                 disabled={isExecuting}
-                className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-40 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/5"
+                className="flex-1 rounded-lg border border-slate-200 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-40 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/5"
               >
                 キャンセル
               </button>
               <button
                 onClick={handleConfirm}
                 disabled={isExecuting}
-                className="flex-1 rounded-xl bg-rose-500 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex-1 rounded-lg bg-rose-500 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isExecuting ? (
                   <span className="mx-auto block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
