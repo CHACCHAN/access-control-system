@@ -27,8 +27,12 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 | キー | 既定値 | 内容 |
 |---|---|---|
 | theme | dark | ライト / ダークテーマ |
+| uiScale | 1.0 | UI 全体の拡大率(0.8〜1.5)。ルート font-size を倍率で変え、rem ベースのサイズ・余白・文字を一括で拡大縮小 |
 | rebootSchedule | (空) | 毎日この時刻(HH:MM)に端末を自動再起動 |
 | screenOffSchedule | (空) | この時刻に画面を暗転(操作で復帰) |
+
+`uiScale` は設定画面で編集中もライブプレビューされ、保存せず閉じると元に戻る。
+不正・範囲外の値は読み込み時に 0.8〜1.5 へクランプされる。
 
 ### デザイン(APPEARANCE)→ 詳細は [ui/design-customization.md](../ui/design-customization.md)
 

@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { useAppVersion } from "@/shared/hooks/useAppVersion";
 import { PATTERN_CLASS, useSettings, type AppSettings } from "@/shared/hooks/useSettings";
-import { applyAccentAttribute } from "@/shared/theme/ThemeContext";
+import { applyAccentAttribute, applyUiScale } from "@/shared/theme/ThemeContext";
 import { restartComputer } from "@/widgets/system-control-panel/api";
 import {
   ArrowLeftIcon,
@@ -87,6 +87,16 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   useEffect(() => {
     return () => applyAccentAttribute(savedAccent);
   }, [savedAccent]);
+
+  // UI 拡大率も同様にライブプレビューし、閉じたら保存済みの値へ戻す。
+  const savedUiScale = settings.uiScale;
+  const draftUiScale = draft.uiScale;
+  useEffect(() => {
+    applyUiScale(draftUiScale);
+  }, [draftUiScale]);
+  useEffect(() => {
+    return () => applyUiScale(savedUiScale);
+  }, [savedUiScale]);
 
   // 背景パターンも編集中の値でプレビュー(このページの背景に反映される)
   const previewPattern = PATTERN_CLASS[draft.appearance.backgroundPattern] ?? "cyber-grid";

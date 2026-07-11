@@ -115,8 +115,25 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   authPanelBg: "",
 };
 
+// UI 全体の拡大率。ルート要素の font-size(rem 基準)を倍率で切り替えて、
+// Tailwind の rem ベースのサイズ・余白・文字を一括で拡大縮小する。
+// キオスクの設置ディスプレイやタッチ操作のしやすさに合わせて調整する。
+export const UI_SCALE_MIN = 0.8;
+export const UI_SCALE_MAX = 1.5;
+export const UI_SCALE_DEFAULT = 1;
+/** rem の基準となる font-size(px)。ブラウザ既定と同じ 16px を 1.0 とする。 */
+export const UI_SCALE_BASE_PX = 16;
+
+/** UI 拡大率を許容範囲にクランプする(不正値・未設定は等倍にフォールバック)。 */
+export function clampUiScale(scale: number): number {
+  if (!Number.isFinite(scale)) return UI_SCALE_DEFAULT;
+  return Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, scale));
+}
+
 export interface AppSettings {
   theme: Theme;
+  // UI 全体の拡大率(1.0 = 等倍)
+  uiScale: number;
   rebootSchedule: string;
   screenOffSchedule: string;
   getEndpoint: string;
@@ -142,6 +159,7 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "dark",
+  uiScale: UI_SCALE_DEFAULT,
   rebootSchedule: "",
   screenOffSchedule: "",
   getEndpoint: "",
@@ -188,6 +206,8 @@ export async function loadSettings(): Promise<AppSettings> {
     return {
       ...DEFAULT_SETTINGS,
       ...stored,
+      // 不正・範囲外の拡大率で画面が壊れないよう読み込み時にクランプする
+      uiScale: clampUiScale(stored.uiScale ?? UI_SCALE_DEFAULT),
       // ネストしたオブジェクトは浅いマージだと保存済みの値で丸ごと
       // 置き換わり、後から追加したキーの既定値が失われるため個別にマージする
       gestureStatusMap: {
