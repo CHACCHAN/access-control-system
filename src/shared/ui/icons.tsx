@@ -333,3 +333,59 @@ export function PaletteIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+export function GestureRockIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M7 11V8.5a1.5 1.5 0 0 1 3 0V11M10 10.5V7a1.5 1.5 0 0 1 3 0v3.5M13 10.5V7.5a1.5 1.5 0 0 1 3 0V11M16 10.8V9a1.5 1.5 0 0 1 3 0v5a6 6 0 0 1-6 6h-1.5a6 6 0 0 1-6-6v-3a1.5 1.5 0 0 1 1.5-1.5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function GestureScissorsIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M9.5 11.5 7.2 4.9a1.5 1.5 0 0 1 2.83-1l2.3 6.6M12.33 10.5l1.9-5.5a1.5 1.5 0 0 1 2.84 1l-2.1 6M8.5 12.5a1.5 1.5 0 0 0-3 .3V15a6 6 0 0 0 6 6H13a6 6 0 0 0 6-6v-1.5a1.5 1.5 0 0 0-3 0"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function GesturePaperIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M6.5 12V6.5a1.25 1.25 0 0 1 2.5 0V11M9 11V4.75a1.25 1.25 0 0 1 2.5 0V10.5M11.5 10.5V4a1.25 1.25 0 0 1 2.5 0v6.5M14 10.5V5.5a1.25 1.25 0 0 1 2.5 0V13M16.5 13l1.3-1.9a1.4 1.4 0 0 1 2.3 1.6l-2.6 4.8a6 6 0 0 1-5.3 3.5h-1a6 6 0 0 1-6-6V12"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function GestureThumbsDownIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M17 14V4M17 13l-4.2 6.8a2 2 0 0 1-3.6-1.6l.9-3.2H6a2 2 0 0 1-2-2.4l1-5A2 2 0 0 1 7 4h10m0 10h2.2c.99 0 1.8-.8 1.8-1.8V5.8c0-1-.81-1.8-1.8-1.8H17"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

@@ -187,7 +187,9 @@
 
 /* サイバー系の背景パターン。トップ画面・設定ページのキャンバスに敷く。
    ライトは薄いスレート、ダークは淡いアクセント色。
-   設定(appearance.backgroundPattern)で grid / dots / diagonal / なし を選べる。 */
+   設定(appearance.backgroundPattern)で
+   grid / dots / diagonal / circuit / signal / なし を選べる。
+   circuit / signal はアニメーション付き(電気信号が流れる演出)。 */
 .cyber-grid {
   background-image:
     linear-gradient(to right, rgba(100, 116, 139, 0.12) 1px, transparent 1px),
@@ -231,6 +233,114 @@
     transparent 1px,
     transparent 22px
   );
+}
+
+/* アニメーション付き背景で流れる光の色(ライト=スレート / ダーク=アクセント)。
+   circuit / signal の疑似要素が参照する。
+   contain: paint が重要: 疑似要素は position: absolute で親からはみ出して
+   動くため、position を持たない要素(設定画面のプレビューサムネイル等)に
+   このクラスを付けると、疑似要素が祖先基準で全画面に描画されてしまう。
+   contain: paint は要素自身を絶対配置の基準にし、かつ描画を要素の箱で
+   クリップするため、どこに付けても光線が外へ漏れない。 */
+.cyber-circuit,
+.cyber-signal {
+  contain: paint;
+  --fx-line: rgba(100, 116, 139, 0.28);
+  --fx-line-soft: rgba(100, 116, 139, 0.16);
+}
+.dark .cyber-circuit,
+.dark .cyber-signal {
+  --fx-line: color-mix(in srgb, var(--color-cyan-400) 45%, transparent);
+  --fx-line-soft: color-mix(in srgb, var(--color-cyan-400) 22%, transparent);
+}
+
+/* 電気回路風: 微かなトレース(格子)の上を光のパルスが縦横に走る */
+.cyber-circuit {
+  background-image:
+    linear-gradient(to right, rgba(100, 116, 139, 0.1) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(100, 116, 139, 0.1) 1px, transparent 1px);
+  background-size: 46px 46px;
+}
+.dark .cyber-circuit {
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--color-cyan-400) 8%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--color-cyan-400) 8%, transparent) 1px, transparent 1px);
+}
+.cyber-circuit::before,
+.cyber-circuit::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.cyber-circuit::before {
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0 138px,
+    var(--fx-line) 138px 140px,
+    transparent 140px 184px
+  );
+  animation: circuit-x 5s linear infinite;
+}
+.cyber-circuit::after {
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0 184px,
+    var(--fx-line-soft) 184px 186px,
+    transparent 186px 230px
+  );
+  animation: circuit-y 7.5s linear infinite;
+}
+@keyframes circuit-x {
+  from {
+    transform: translateX(-184px);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes circuit-y {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(230px);
+  }
+}
+
+/* 電気信号風: 斜めに流れるデータストリーム。回転した帯を1周期分だけ
+   平行移動させることで継ぎ目なくループさせる(はみ出しは overflow:hidden で切る)。 */
+.cyber-signal::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0 66px,
+    var(--fx-line) 66px 68px,
+    var(--fx-line-soft) 68px 70px,
+    transparent 70px 96px
+  );
+  transform: rotate(18deg) translateX(0);
+  animation: signal-move 5s linear infinite;
+}
+@keyframes signal-move {
+  from {
+    transform: rotate(18deg) translateX(0);
+  }
+  to {
+    transform: rotate(18deg) translateX(96px);
+  }
+}
+
+/* モーション軽減設定を尊重して、動く背景は止める */
+@media (prefers-reduced-motion: reduce) {
+  .cyber-circuit::before,
+  .cyber-circuit::after,
+  .cyber-signal::before {
+    animation: none;
+  }
 }
 
 /* HUD 風の角マーカー(カード四隅にシアンの L 字を描く) */

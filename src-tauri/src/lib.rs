@@ -1,5 +1,8 @@
 use serde::Serialize;
-use sysinfo::{Disks, System};
+use std::sync::Mutex;
+use std::time::Instant;
+use sysinfo::{Disks, Networks, System};
+use tauri::State;
 
 mod camera_capture;
 mod settings;
@@ -104,6 +107,163 @@ fn get_system_spec() -> SystemSpec {
     }
 }
 
+// X 側の「自動」消灯を無効化する。
+// 画面の消灯・復帰(顔検出による人感復帰を含む)はアプリの ScreenDimmer が
+// 担う設計のため、X が勝手にディスプレイを消してしまうと、アプリ側の
+// 復帰処理とタイミングが合わず「顔を近づけても復帰しない」状態になる。
+// DPMS 拡張そのものは set_display_power の force off/on で使うため無効化せず、
+// 自動発動のタイマーだけをゼロにする(xset dpms 0 0 0)。
+#[cfg(target_os = "linux")]
+fn disable_x_screen_blanking() {
+    for args in [&["s", "off"][..], &["s", "noblank"][..], &["dpms", "0", "0", "0"][..]] {
+        match std::process::Command::new("xset").args(args).status() {
+            Ok(status) if status.success() => {}
+            Ok(status) => eprintln!("[display] xset {args:?} が失敗しました: {status}"),
+            Err(e) => eprintln!("[display] xset を実行できません: {e}"),
+        }
+    }
+    eprintln!("[display] X の自動消灯を無効化しました(消灯・復帰はアプリが管理)");
+}
+
+/// DPMS でディスプレイを強制点灯する。フロントからの復帰(set_display_power)と
+/// Rust 側の人感復帰ウォッチャー(vision::start_wake_watch)の両方から使う。
+pub fn display_force_on() {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xset")
+            .args(["dpms", "force", "on"])
+            .status();
+        // スクリーンセーバー側の状態もリセットしておく
+        let _ = std::process::Command::new("xset").args(["s", "reset"]).status();
+    }
+}
+
+// ディスプレイの電源(DPMS)を制御する。
+// 自動消灯では黒レイヤーを被せるだけでなく、バックライトごと物理的に消灯して
+// ディスプレイの発熱・消費電力を抑える(off)。復帰時は強制点灯する(on)。
+#[tauri::command]
+fn set_display_power(on: bool) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        if on {
+            display_force_on();
+        } else {
+            let status = std::process::Command::new("xset")
+                .args(["dpms", "force", "off"])
+                .status()
+                .map_err(|e| format!("xset を実行できません: {e}"))?;
+            if !status.success() {
+                return Err(format!("xset dpms force off が失敗しました: {status}"));
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = on;
+    Ok(())
+}
+
+// スピーカーのハードウェア音量(ALSA ミキサー)を設定する。
+// PipeWire 未整備のミニマル startx キオスク環境のため amixer を直接叩く。
+// Master が存在しないサウンドカードでは PCM へフォールバックする。
+#[tauri::command]
+fn set_system_volume(percent: u8) -> Result<(), String> {
+    let percent = percent.min(100);
+    let mut last_err = String::new();
+    for control in ["Master", "PCM"] {
+        match std::process::Command::new("amixer")
+            .args(["-q", "sset", control, &format!("{percent}%"), "unmute"])
+            .status()
+        {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => last_err = format!("amixer sset {control} が失敗しました: {status}"),
+            Err(e) => last_err = format!("amixer を実行できません: {e}"),
+        }
+    }
+    Err(format!("音量を設定できませんでした: {last_err}"))
+}
+
+// フッターのタスクマネージャ表示用のリアルタイム統計。
+// CPU 使用率は「前回リフレッシュからの差分」で算出されるため、System を
+// 呼び出しごとに作り直さず管理状態として保持する(初回呼び出しは 0% になるが、
+// フロントが数秒間隔でポーリングするため2回目以降は正しい値になる)。
+struct StatsInner {
+    sys: System,
+    networks: Networks,
+    last_poll: Instant,
+}
+
+#[derive(Default)]
+pub struct SystemStatsState(Mutex<Option<StatsInner>>);
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SystemStats {
+    cpu_percent: f32,
+    mem_percent: f32,
+    mem_used_gb: f64,
+    mem_total_gb: f64,
+    /// ループバックを除く全インターフェース合算の受信/送信レート(bytes/秒)
+    rx_bytes_per_sec: f64,
+    tx_bytes_per_sec: f64,
+    ip: Option<String>,
+}
+
+#[tauri::command]
+fn get_system_stats(state: State<SystemStatsState>) -> Result<SystemStats, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "内部状態のロックに失敗しました".to_string())?;
+    let inner = guard.get_or_insert_with(|| StatsInner {
+        sys: System::new(),
+        networks: Networks::new_with_refreshed_list(),
+        last_poll: Instant::now(),
+    });
+
+    inner.sys.refresh_cpu_usage();
+    inner.sys.refresh_memory();
+    inner.networks.refresh(true);
+
+    let elapsed_secs = inner.last_poll.elapsed().as_secs_f64().max(0.001);
+    inner.last_poll = Instant::now();
+
+    // received()/transmitted() は「前回リフレッシュからの増分」を返す
+    let (mut rx, mut tx) = (0u64, 0u64);
+    for (name, data) in inner.networks.iter() {
+        if name == "lo" {
+            continue;
+        }
+        rx += data.received();
+        tx += data.transmitted();
+    }
+
+    let total_mem = inner.sys.total_memory();
+    let used_mem = inner.sys.used_memory();
+
+    let ip = if_addrs::get_if_addrs()
+        .ok()
+        .and_then(|ifaces| {
+            ifaces
+                .into_iter()
+                .find(|iface| !iface.is_loopback() && iface.addr.ip().is_ipv4())
+        })
+        .map(|iface| iface.addr.ip().to_string());
+
+    Ok(SystemStats {
+        cpu_percent: inner.sys.global_cpu_usage(),
+        mem_percent: if total_mem > 0 {
+            (used_mem as f64 / total_mem as f64 * 100.0) as f32
+        } else {
+            0.0
+        },
+        mem_used_gb: used_mem as f64 / 1024f64.powi(3),
+        mem_total_gb: total_mem as f64 / 1024f64.powi(3),
+        rx_bytes_per_sec: rx as f64 / elapsed_secs,
+        tx_bytes_per_sec: tx as f64 / elapsed_secs,
+        ip,
+    })
+}
+
 // ネットワーク疎通確認用。ループバックを除く最初の IPv4 インターフェースを返す。
 // リンクローカルアドレス(169.254.x.x 等)しか無い場合は DHCP 未取得とみなす。
 #[derive(Serialize)]
@@ -202,6 +362,9 @@ pub fn run() {
         .manage(camera_capture::CameraCaptureState::default())
         .manage(camera_capture::SharedFrame::default())
         .manage(vision::VisionState::default())
+        .manage(vision::OverlayState::default())
+        .manage(vision::WakeWatchState::default())
+        .manage(SystemStatsState::default())
         .invoke_handler(tauri::generate_handler![
             greet,
             shutdown_computer,
@@ -210,17 +373,25 @@ pub fn run() {
             get_display_info,
             get_system_spec,
             get_network_info,
+            get_system_stats,
+            set_system_volume,
+            set_display_power,
             camera_capture::start_camera_capture,
             camera_capture::stop_camera_capture,
             vision::init_vision,
             vision::set_enrolled_faces,
             vision::recognize_face,
             vision::capture_face_embedding,
-            vision::detect_gesture
+            vision::detect_gesture,
+            vision::start_wake_watch,
+            vision::stop_wake_watch
         ])
         .setup(|app| {
             #[cfg(target_os = "linux")]
-            setup_webkit_media_permissions(app);
+            {
+                setup_webkit_media_permissions(app);
+                disable_x_screen_blanking();
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

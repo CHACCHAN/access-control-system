@@ -1,6 +1,8 @@
 import { useMembers } from "@/entities/member/MemberContext";
 import { ATTENDANCE_STATUSES } from "@/entities/member/statusStyle";
+import { FaceRegistrationForm } from "@/features/face-auth/FaceRegistrationForm";
 import { useSettings, type MemberListLayout } from "@/shared/hooks/useSettings";
+import type { AuthMode } from "@/app/App";
 import { MemberCard } from "./MemberCard";
 
 // 設定(appearance.memberListLayout)→ 一覧コンテナのクラス
@@ -10,9 +12,21 @@ const LAYOUT_CLASS: Record<MemberListLayout, string> = {
   list: "flex flex-col gap-2",
 };
 
-export function MemberListPanel() {
+interface MemberListPanelProps {
+  mode: AuthMode;
+  setMode: (mode: AuthMode) => void;
+}
+
+export function MemberListPanel({ mode, setMode }: MemberListPanelProps) {
   const { members, isLoading, error, activeMember, selectMember } = useMembers();
   const { settings } = useSettings();
+
+  // 顔登録中はメンバー一覧の位置に登録フォームを差し替える(右側のカメラは
+  // 検出可視化を続けたまま、左で名前を選んで登録できるようにする)。
+  if (mode === "register") {
+    return <FaceRegistrationForm onClose={() => setMode("recognize")} />;
+  }
+
   const layout = settings.appearance.memberListLayout;
   const customBg = settings.appearance.memberPanelBg;
 

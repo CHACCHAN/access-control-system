@@ -100,8 +100,17 @@ export async function registerDescriptor(
   });
 
   if (!response.ok) {
-    console.error(`[registerDescriptor] HTTPエラー: status=${response.status}`);
-    throw new Error(`特徴ベクトルの登録に失敗しました: ${response.status}`);
+    // サーバーの拒否理由(例: pgvector のカラムが VECTOR(128) のままで 512次元を
+    // 受け付けない等)をそのまま出せるよう、レスポンスボディも添えて投げる。
+    const errorBody = await response.text().catch(() => "");
+    console.error(
+      `[registerDescriptor] HTTPエラー: status=${response.status} body=${errorBody.slice(0, 200)}`,
+    );
+    throw new Error(
+      `特徴ベクトルの登録に失敗しました: ${response.status}${
+        errorBody ? ` ${errorBody.slice(0, 120)}` : ""
+      }`,
+    );
   }
   console.log(`[registerDescriptor] ${username} の登録に成功しました`);
 }

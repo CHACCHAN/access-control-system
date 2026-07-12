@@ -48,7 +48,11 @@ interface Member {
 { "descriptor": "{{descriptor}}" }
 ```
 
-- `{{descriptor}}` は number[](512次元)に置換される。
+- `{{descriptor}}` は number[](**512次元**・ArcFace)に置換される。
+- サーバー側の格納カラム(pgvector 想定)は **`VECTOR(512)`** である必要がある。
+  旧 faceapi.js 時代の `VECTOR(128)` のままだと、次元不一致で登録 API が **400** を返す
+  (アプリは常に 512次元を送る)。その場合はサーバーのカラム型を `VECTOR(512)` へ
+  マイグレーションする。登録失敗時はサーバーのレスポンス本文をエラーに含めて表示する。
 
 ## 4. 更新シグナル(WebSocket)
 

@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::time::Instant;
 
 use super::geometry::{
-    apply_affine, dist, letterbox, nms, rotation_matrix, warp_affine, DetBox, RgbBuf,
+    apply_affine, dist, invert_affine, letterbox, nms, rotation_matrix, warp_affine, DetBox, RgbBuf,
 };
 use super::runtime::{elapsed_ms, load_session, run_single_input, Session};
 
@@ -38,12 +38,24 @@ pub enum Gesture {
     Rock,
     Scissors,
     Paper,
+    /// 親指を立てる(確認カードの「はい」などに使える。現状ステータスには割り当てない)
+    ThumbsUp,
+    /// 親指を下に向ける(確認カードの「ちがう」)
+    ThumbsDown,
     Unknown,
 }
+
+/// サムズアップ/ダウンの上下判定マージン(手のサイズ比)。
+/// 親指の先が手首からこの比率以上 上/下 に離れているときだけ判定する。
+const THUMB_DIRECTION_MARGIN: f32 = 0.25;
 
 pub struct HandResult {
     pub gesture: Gesture,
     pub confidence: f32,
+    /// 手のひら検出 bbox(元フレーム座標)
+    pub palm_bbox: [f32; 4],
+    /// 21点手ランドマーク(元フレーム座標)。オーバーレイ描画用。
+    pub points_frame: Vec<[f32; 2]>,
 }
 
 pub struct GestureEngine {
@@ -222,7 +234,7 @@ impl GestureEngine {
         }
 
         // --- 3. 上方向へシフト(-0.4)しつつ×3に広げて再切り出し
-        let (crop2, _bbox2, _bias2) = crop_and_pad(
+        let (crop2, _bbox2, bias2) = crop_and_pad(
             &rotated,
             &[min_x, min_y, max_x, max_y],
             PALM_BOX_SHIFT_Y,
@@ -272,13 +284,33 @@ impl GestureEngine {
             return Ok(None);
         }
 
-        // 21点 (x, y, z) → (x, y) のみ使用
+        // 21点 (x, y, z) → (x, y) のみ使用。この座標は 224x224 入力
+        // (回転補正後クロップをリサイズしたもの)の座標系。
         let pts: Vec<[f32; 2]> = (0..21)
             .map(|i| [landmarks[i * 3], landmarks[i * 3 + 1]])
             .collect();
+
+        // オーバーレイ描画用に元フレーム座標へ逆変換する。
+        // 224入力 →(/scale)→ crop2 →(+bias2)→ rotated →(rot^-1)→ crop1
+        //        →(+bias1)→ フレーム、の順に前処理を巻き戻す。
+        let rot_inv = invert_affine(&rot);
+        let points_frame: Vec<[f32; 2]> = pts
+            .iter()
+            .map(|p| {
+                let cx = p[0] / scale + bias2[0];
+                let cy = p[1] / scale + bias2[1];
+                let (rx, ry) = apply_affine(&rot_inv, cx, cy);
+                [rx + bias1[0], ry + bias1[1]]
+            })
+            .collect();
+
         Ok(Some(HandResult {
-            gesture: classify_gesture(&pts),
+            // 形の判定は回転補正後のクロップ座標(回転不変)、サムズアップ/ダウンの
+            // 上下判定は元フレーム座標(実世界の向き)を使う
+            gesture: classify_gesture(&pts, &points_frame),
             confidence: conf,
+            palm_bbox: palm.bbox,
+            points_frame,
         }))
     }
 
@@ -354,18 +386,22 @@ fn crop_and_pad(
     )
 }
 
-/// 21点ランドマークからグー/チョキ/パーを判定する。
+/// 21点ランドマークからジェスチャーを判定する。
 ///
+/// 形の判定(pts: 回転補正後クロップ座標):
 /// 各指(人差し指〜小指)は「手首から指先までの距離」が「手首からPIP関節
 /// までの距離」より十分長ければ伸展とみなす(回転・スケール不変)。
 /// 親指は折り畳むと指先が小指の付け根(17)に近づく性質を使い、
 /// MP関節(2)との距離比で判定する。
 ///
-/// - グー   : 5指すべて曲がっている
-/// - チョキ : 人差し指・中指のみ伸びている
-/// - パー   : 5指すべて伸びている
+/// - グー           : 5指すべて曲がっている
+/// - チョキ         : 人差し指・中指のみ伸びている
+/// - パー           : 5指すべて伸びている
+/// - サムズアップ/ダウン: 親指のみ伸びている。上下の向きは回転補正の影響を
+///   受けない元フレーム座標(pts_frame: y は画像下向き)で、親指の先が手首より
+///   手のサイズ比で十分 上/下 にあるかで決める
 /// - それ以外は Unknown
-fn classify_gesture(pts: &[[f32; 2]]) -> Gesture {
+fn classify_gesture(pts: &[[f32; 2]], pts_frame: &[[f32; 2]]) -> Gesture {
     let wrist = pts[0];
     // (PIP, TIP) のランドマークインデックス: 人差し指・中指・薬指・小指
     let fingers = [(6usize, 8usize), (10, 12), (14, 16), (18, 20)];
@@ -385,6 +421,17 @@ fn classify_gesture(pts: &[[f32; 2]]) -> Gesture {
         Gesture::Paper
     } else if extended[0] && extended[1] && !extended[2] && !extended[3] && !thumb_extended {
         Gesture::Scissors
+    } else if extended_count == 0 && thumb_extended && pts_frame.len() >= 21 {
+        // 親指のみ伸展 → 実世界の向きでサムズアップ/ダウンを判定
+        let hand_size = dist(pts_frame[0], pts_frame[9]).max(1e-3);
+        let dy = pts_frame[4][1] - pts_frame[0][1]; // y は画像下向き
+        if dy < -hand_size * THUMB_DIRECTION_MARGIN {
+            Gesture::ThumbsUp
+        } else if dy > hand_size * THUMB_DIRECTION_MARGIN {
+            Gesture::ThumbsDown
+        } else {
+            Gesture::Unknown
+        }
     } else {
         Gesture::Unknown
     }
@@ -435,7 +482,7 @@ mod tests {
     #[test]
     fn classifies_paper() {
         let pts = base_hand();
-        assert_eq!(classify_gesture(&pts), Gesture::Paper);
+        assert_eq!(classify_gesture(&pts, &pts), Gesture::Paper);
     }
 
     #[test]
@@ -445,7 +492,7 @@ mod tests {
             curl_finger(&mut pts, f);
         }
         curl_thumb(&mut pts);
-        assert_eq!(classify_gesture(&pts), Gesture::Rock);
+        assert_eq!(classify_gesture(&pts, &pts), Gesture::Rock);
     }
 
     #[test]
@@ -454,14 +501,39 @@ mod tests {
         curl_finger(&mut pts, 2); // 薬指
         curl_finger(&mut pts, 3); // 小指
         curl_thumb(&mut pts);
-        assert_eq!(classify_gesture(&pts), Gesture::Scissors);
+        assert_eq!(classify_gesture(&pts, &pts), Gesture::Scissors);
     }
 
     #[test]
     fn ambiguous_is_unknown() {
         let mut pts = base_hand();
         curl_finger(&mut pts, 0); // 人差し指だけ曲げる(=中指〜小指伸展)
-        assert_eq!(classify_gesture(&pts), Gesture::Unknown);
+        assert_eq!(classify_gesture(&pts, &pts), Gesture::Unknown);
+    }
+
+    // 親指のみ伸展の手(サムズアップ/ダウンの形)。base_hand から4指を曲げ、
+    // 親指は伸ばしたまま(base_hand の親指は伸展状態)。
+    fn thumbs_hand() -> Vec<[f32; 2]> {
+        let mut pts = base_hand();
+        for f in 0..4 {
+            curl_finger(&mut pts, f);
+        }
+        pts
+    }
+
+    #[test]
+    fn classifies_thumbs_up() {
+        let pts = thumbs_hand();
+        // フレーム座標: 親指の先(4)が手首(0)より上(y が小さい)= base_hand のまま
+        assert_eq!(classify_gesture(&pts, &pts), Gesture::ThumbsUp);
+    }
+
+    #[test]
+    fn classifies_thumbs_down() {
+        let pts = thumbs_hand();
+        // フレーム座標だけ上下反転(手を下に向けた状態)にする
+        let frame: Vec<[f32; 2]> = pts.iter().map(|p| [p[0], -p[1]]).collect();
+        assert_eq!(classify_gesture(&pts, &frame), Gesture::ThumbsDown);
     }
 
     #[test]

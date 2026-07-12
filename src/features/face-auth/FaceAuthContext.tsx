@@ -28,6 +28,8 @@ export type FaceMediaKind = "video" | "img";
 
 interface FaceAuthContextValue {
   mediaRef: RefObject<FaceMediaElement | null>;
+  /** 実機(img)のみ: ちらつき対策のダブルバッファ裏面 */
+  mediaBufferRef?: RefObject<HTMLImageElement | null>;
   mediaKind: FaceMediaKind;
   cameraStatus: CameraStatus;
   cameraError: string | null;
@@ -42,6 +44,7 @@ const FaceAuthContext = createContext<FaceAuthContextValue | null>(null);
 
 interface CameraFeed {
   mediaRef: RefObject<FaceMediaElement | null>;
+  mediaBufferRef?: RefObject<HTMLImageElement | null>;
   mediaKind: FaceMediaKind;
   status: CameraStatus;
   error: string | null;
@@ -123,6 +126,7 @@ function FaceAuthProviderInner({
     <FaceAuthContext.Provider
       value={{
         mediaRef: camera.mediaRef,
+        mediaBufferRef: camera.mediaBufferRef,
         mediaKind: camera.mediaKind,
         cameraStatus: camera.status,
         cameraError: camera.error,
@@ -147,9 +151,17 @@ function BrowserFaceAuthProvider({ children }: { children: ReactNode }) {
 }
 
 function NativeFaceAuthProvider({ children }: { children: ReactNode }) {
-  const { imgRef, status, error } = useNativeCameraFeed();
+  const { imgRef, imgBufferRef, status, error } = useNativeCameraFeed();
   return (
-    <FaceAuthProviderInner camera={{ mediaRef: imgRef, mediaKind: "img", status, error }}>
+    <FaceAuthProviderInner
+      camera={{
+        mediaRef: imgRef,
+        mediaBufferRef: imgBufferRef,
+        mediaKind: "img",
+        status,
+        error,
+      }}
+    >
       {children}
     </FaceAuthProviderInner>
   );

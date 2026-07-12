@@ -21,13 +21,19 @@ export interface FaceEmbeddingResult {
   detScore: number;
 }
 
-export type GestureKind = "Rock" | "Scissors" | "Paper" | "Unknown";
+export type GestureKind =
+  | "Rock"
+  | "Scissors"
+  | "Paper"
+  | "ThumbsUp"
+  | "ThumbsDown"
+  | "Unknown";
 
 export interface GestureResult {
   handDetected: boolean;
   gesture: GestureKind;
   confidence: number;
-  /** ジェスチャー→在室ステータス設定を適用した結果(未割り当てなら null) */
+  /** ジェスチャー→在室ステータス設定を適用した結果(未割り当て・サムズ系は null) */
   roomStatus: string | null;
 }
 

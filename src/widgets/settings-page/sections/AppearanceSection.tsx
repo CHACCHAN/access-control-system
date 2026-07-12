@@ -29,6 +29,8 @@ const PATTERN_OPTIONS: { value: BackgroundPattern; label: string; previewClass: 
   { value: "grid", label: "グリッド", previewClass: "cyber-grid" },
   { value: "dots", label: "ドット", previewClass: "cyber-dots" },
   { value: "diagonal", label: "斜線", previewClass: "cyber-diagonal" },
+  { value: "circuit", label: "回路(動)", previewClass: "cyber-circuit" },
+  { value: "signal", label: "信号(動)", previewClass: "cyber-signal" },
   { value: "none", label: "なし", previewClass: "" },
 ];
 
@@ -39,7 +41,7 @@ const LAYOUT_OPTIONS: { value: MemberListLayout; label: string; hint: string }[]
 ];
 
 const PANEL_BG_FIELDS: {
-  key: "memberPanelBg" | "authPanelBg";
+  key: "memberPanelBg" | "authPanelBg" | "registerPanelBg";
   label: string;
   hint: string;
 }[] = [
@@ -52,6 +54,11 @@ const PANEL_BG_FIELDS: {
     key: "authPanelBg",
     label: "右パネル(顔認証)の背景色",
     hint: "トップ画面右側の背景を任意の色にします。未設定はテーマの既定色",
+  },
+  {
+    key: "registerPanelBg",
+    label: "顔登録画面の背景色",
+    hint: "顔登録中に左パネルへ表示される登録フォームの背景色。未設定はテーマの既定色",
   },
 ];
 
@@ -110,7 +117,7 @@ export function AppearanceSection({ draft, setDraft }: SectionProps) {
             背景パターン
           </p>
           <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
-            トップ画面と設定画面に薄く敷く装飾です
+            トップ画面に薄く敷く装飾です。回路(動)・信号(動)は右側(顔認証パネル)の背景でアニメーションします
           </p>
           <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
             {PATTERN_OPTIONS.map(({ value, label, previewClass }) => {

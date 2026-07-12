@@ -55,6 +55,74 @@ impl RgbBuf {
     }
 }
 
+/// RGB バッファ(生スライス)への簡易描画。検出結果(顔枠・ランドマーク・
+/// 手の骨格)をカメラフレームへ直接上書きするために使う。座標は「x右・y下」の
+/// ピクセル。RgbBuf の所有権を取らず、キャプチャの生バッファをそのまま塗れる。
+pub struct Canvas<'a> {
+    pub data: &'a mut [u8],
+    pub width: usize,
+    pub height: usize,
+}
+
+impl<'a> Canvas<'a> {
+    pub fn new(data: &'a mut [u8], width: usize, height: usize) -> Self {
+        Self { data, width, height }
+    }
+
+    #[inline]
+    fn blend_px(&mut self, x: i32, y: i32, color: [u8; 3], alpha: f32) {
+        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
+            return;
+        }
+        let i = (y as usize * self.width + x as usize) * 3;
+        let a = alpha.clamp(0.0, 1.0);
+        for c in 0..3 {
+            let bg = self.data[i + c] as f32;
+            self.data[i + c] = (bg * (1.0 - a) + color[c] as f32 * a).round() as u8;
+        }
+    }
+
+    /// 中心 (cx, cy)・半径 radius の塗り潰し円(点・線の太さ表現に使う)。
+    pub fn draw_disc(&mut self, cx: f32, cy: f32, radius: f32, color: [u8; 3]) {
+        let r = radius.max(0.5);
+        let r2 = r * r;
+        let x0 = (cx - r).floor() as i32;
+        let x1 = (cx + r).ceil() as i32;
+        let y0 = (cy - r).floor() as i32;
+        let y1 = (cy + r).ceil() as i32;
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let dx = x as f32 + 0.5 - cx;
+                let dy = y as f32 + 0.5 - cy;
+                if dx * dx + dy * dy <= r2 {
+                    self.blend_px(x, y, color, 1.0);
+                }
+            }
+        }
+    }
+
+    /// 太さ付き線分。端点間を等間隔にサンプリングして円を並べる。
+    pub fn draw_line(&mut self, a: [f32; 2], b: [f32; 2], thickness: f32, color: [u8; 3]) {
+        let dx = b[0] - a[0];
+        let dy = b[1] - a[1];
+        let len = (dx * dx + dy * dy).sqrt();
+        let steps = len.ceil().max(1.0) as i32;
+        let r = (thickness / 2.0).max(0.5);
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            self.draw_disc(a[0] + dx * t, a[1] + dy * t, r, color);
+        }
+    }
+
+    /// 矩形の外枠([x1,y1]-[x2,y2])を太さ thickness で描く。
+    pub fn draw_rect(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, thickness: f32, color: [u8; 3]) {
+        self.draw_line([x1, y1], [x2, y1], thickness, color);
+        self.draw_line([x2, y1], [x2, y2], thickness, color);
+        self.draw_line([x2, y2], [x1, y2], thickness, color);
+        self.draw_line([x1, y2], [x1, y1], thickness, color);
+    }
+}
+
 /// 2x3 アフィン変換行列(row-major)。dst = M * [x, y, 1]^T
 pub type Affine = [[f32; 3]; 2];
 

@@ -17,6 +17,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 
+use crate::vision::OverlayState;
+
 // フレーム間隔と JPEG 品質は設定(settings.json の performance)で調整できる。
 // 既定値は crate::settings::PerfSettings::default() を参照。
 const CAPTURE_WIDTH: u32 = 640;
@@ -62,6 +64,7 @@ pub fn start_camera_capture(
     app: AppHandle,
     state: State<CameraCaptureState>,
     shared_frame: State<SharedFrame>,
+    overlay_state: State<OverlayState>,
 ) -> Result<(), String> {
     let mut guard = state
         .0
@@ -84,8 +87,10 @@ pub fn start_camera_capture(
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
     let thread_shared_frame = shared_frame.inner().clone();
-    let join_handle =
-        std::thread::spawn(move || run_capture_loop(&app, &thread_stop_flag, &thread_shared_frame));
+    let thread_overlay = overlay_state.inner().clone();
+    let join_handle = std::thread::spawn(move || {
+        run_capture_loop(&app, &thread_stop_flag, &thread_shared_frame, &thread_overlay)
+    });
 
     *guard = Some(CaptureHandle {
         stop_flag,
@@ -269,7 +274,12 @@ fn open_first_available_camera() -> Result<Camera, String> {
     Err(format!("カメラを開けませんでした: {last_err}"))
 }
 
-fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>, shared_frame: &SharedFrame) {
+fn run_capture_loop(
+    app: &AppHandle,
+    stop_flag: &Arc<AtomicBool>,
+    shared_frame: &SharedFrame,
+    overlay: &OverlayState,
+) {
     // 設定はキャプチャ開始時に一度だけ読む(設定保存時は端末ごと再起動する運用のため)
     let perf = crate::settings::load_perf(app);
     let frame_interval = Duration::from_millis(perf.camera_frame_interval_ms);
@@ -304,7 +314,7 @@ fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>, shared_frame: 
     while !stop_flag.load(Ordering::SeqCst) {
         let loop_start = Instant::now();
 
-        match capture_and_encode_frame(&mut camera, shared_frame, jpeg_quality) {
+        match capture_and_encode_frame(&mut camera, shared_frame, overlay, jpeg_quality) {
             Ok(image_data) => {
                 consecutive_errors = 0;
                 let _ = app.emit("camera-frame", CameraFramePayload { image_data });
@@ -333,28 +343,37 @@ fn run_capture_loop(app: &AppHandle, stop_flag: &Arc<AtomicBool>, shared_frame: 
 fn capture_and_encode_frame(
     camera: &mut Camera,
     shared_frame: &SharedFrame,
+    overlay: &OverlayState,
     jpeg_quality: u8,
 ) -> Result<String, String> {
     use base64::Engine;
 
     let frame = camera.frame().map_err(|e| e.to_string())?;
     let decoded = frame.decode_image::<RgbFormat>().map_err(|e| e.to_string())?;
+    let width = decoded.width();
+    let height = decoded.height();
+    let mut rgb = decoded.into_raw();
 
-    // 推論(顔認証・ジェスチャー認識)用にデコード済みフレームを共有する。
-    // ロック中の処理はメモリコピーのみで、推論そのものはここでは行わない
-    // (推論はフロントからの Tauri command 契機で別スレッドが実行する)。
+    // 推論(顔認証・ジェスチャー認識)用には「オーバーレイを描く前」のクリーンな
+    // フレームを共有する。オーバーレイ入りのフレームで推論すると精度が落ちるため。
     if let Ok(mut guard) = shared_frame.0.lock() {
         *guard = Some(LatestFrame {
-            width: decoded.width(),
-            height: decoded.height(),
-            rgb: decoded.as_raw().clone(),
+            width,
+            height,
+            rgb: rgb.clone(),
             captured_at: Instant::now(),
         });
     }
 
+    // フロント表示用フレームには検出結果(顔枠・ランドマーク・手の骨格)を
+    // Rust 側で直接焼き込む。フロントは焼き込み済みのフレームを表示するだけ。
+    overlay.render(&mut rgb, width as usize, height as usize);
+
+    let img = image::RgbImage::from_raw(width, height, rgb)
+        .ok_or("フレームバッファのサイズが不正です")?;
     let mut jpeg_bytes = Vec::new();
     JpegEncoder::new_with_quality(&mut jpeg_bytes, jpeg_quality)
-        .encode_image(&decoded)
+        .encode_image(&img)
         .map_err(|e| e.to_string())?;
 
     Ok(base64::engine::general_purpose::STANDARD.encode(&jpeg_bytes))

@@ -3,27 +3,18 @@ import type { AttendanceStatus } from "@/entities/member/api";
 import { useMembers } from "@/entities/member/MemberContext";
 import { ATTENDANCE_STATUSES, STATUS_STYLE } from "@/entities/member/statusStyle";
 import { useSettings } from "@/shared/hooks/useSettings";
-import { detectGesture, type GestureKind } from "@/shared/lib/visionApi";
+import { playUiSound } from "@/shared/lib/uiSound";
+import { GestureGuide } from "@/features/gesture/GestureGuide";
+import { useGestureStatusLoop } from "@/features/gesture/useGestureStatusLoop";
 import { postAttendance } from "./api";
 import { CheckIcon, CloseIcon } from "@/shared/ui/icons";
-
-const GESTURE_EMOJI: Record<Exclude<GestureKind, "Unknown">, string> = {
-  Rock: "✊",
-  Scissors: "✌️",
-  Paper: "✋",
-};
 
 export function AttendanceActionSheet() {
   const { activeMember: member, clearSelection, updateStatus } = useMembers();
   const { settings } = useSettings();
-  // ジェスチャー認識のポーリング間隔。このシート表示中は顔認証ループが
-  // 停止しているため、CPU(i7-3770想定)を取り合うことはない。
-  const gesturePollIntervalMs = Math.max(200, settings.performance.gesturePollIntervalMs || 700);
-  // 誤爆防止: 同じジェスチャーがこの回数連続したときだけステータスを更新する
-  const gestureStableCount = Math.max(1, Math.round(settings.performance.gestureStableCount) || 1);
   const [pendingAction, setPendingAction] = useState<AttendanceStatus | null>(null);
   const [completedAction, setCompletedAction] = useState<AttendanceStatus | null>(null);
-  const [detectedGesture, setDetectedGesture] = useState<GestureKind | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // シートは選択メンバーが変わっても同一コンポーネントとして存在し続ける(null を
   // 返して非表示になるだけ)ため、前回の完了表示が次のメンバーに引き継がれないよう
@@ -31,7 +22,7 @@ export function AttendanceActionSheet() {
   useEffect(() => {
     setPendingAction(null);
     setCompletedAction(null);
-    setDetectedGesture(null);
+    setErrorMessage(null);
   }, [member?.username]);
 
   const busy = pendingAction !== null || completedAction !== null;
@@ -39,63 +30,20 @@ export function AttendanceActionSheet() {
   // handleAction を効果内(ジェスチャー確定時)から安全に呼ぶための参照
   const handleActionRef = useRef<(action: AttendanceStatus) => void>(() => {});
 
-  // シート表示中はRust側のジェスチャー認識をポーリングし、設定でステータスが
-  // 割り当てられたジェスチャーが安定して検出されたらそのステータスで更新する。
-  useEffect(() => {
-    if (!member || busy) return;
-
-    let cancelled = false;
-    let inFlight = false;
-    let errorLogged = false;
-    let lastGesture: GestureKind | null = null;
-    let streak = 0;
-
-    const timer = window.setInterval(async () => {
-      if (inFlight || cancelled) return;
-      inFlight = true;
-      try {
-        const result = await detectGesture();
-        if (cancelled) return;
-        errorLogged = false;
-        setDetectedGesture(result.handDetected ? result.gesture : null);
-
-        if (result.gesture !== "Unknown" && result.gesture === lastGesture) {
-          streak += 1;
-        } else {
-          streak = 1;
-        }
-        lastGesture = result.gesture;
-
-        if (
-          streak >= gestureStableCount &&
-          result.roomStatus &&
-          (ATTENDANCE_STATUSES as string[]).includes(result.roomStatus)
-        ) {
-          streak = 0;
-          handleActionRef.current(result.roomStatus as AttendanceStatus);
-        }
-      } catch (err) {
-        // カメラフレーム未取得・ブラウザ単体実行など。ログを埋めないよう1回だけ記録
-        if (!errorLogged) {
-          errorLogged = true;
-          console.error("[gesture] 認識エラー:", err);
-        }
-      } finally {
-        inFlight = false;
-      }
-    }, gesturePollIntervalMs);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [member, busy, gesturePollIntervalMs, gestureStableCount]);
+  // シート表示中(手動選択で開いた場合=顔認証で特定されていない人も含む)は
+  // ジェスチャー操作を受け付ける。このシート表示中は顔認証ループが停止して
+  // いるため、CPU(i7-3770想定)を取り合うことはない。
+  const { detectedGesture } = useGestureStatusLoop({
+    active: member !== null && !busy,
+    onStatus: (status) => handleActionRef.current(status),
+  });
 
   if (!member) return null;
 
   async function handleAction(action: AttendanceStatus) {
     if (!member || pendingAction || completedAction || action === member.status) return;
     setPendingAction(action);
+    setErrorMessage(null);
     try {
       await postAttendance(
         member.username,
@@ -105,23 +53,18 @@ export function AttendanceActionSheet() {
         settings.apiToken,
         settings.attendanceBodyTemplate,
       );
+      playUiSound("success");
       updateStatus(member.username, action);
       setCompletedAction(action);
       setTimeout(clearSelection, 1100);
+    } catch (err) {
+      playUiSound("error");
+      setErrorMessage(err instanceof Error ? err.message : String(err));
     } finally {
       setPendingAction(null);
     }
   }
   handleActionRef.current = handleAction;
-
-  // 設定でステータスが割り当てられているジェスチャーだけ案内に出す
-  const gestureLegend = (
-    [
-      ["Rock", settings.gestureStatusMap.rock],
-      ["Scissors", settings.gestureStatusMap.scissors],
-      ["Paper", settings.gestureStatusMap.paper],
-    ] as const
-  ).filter(([, status]) => status !== "");
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm animate-fade-in dark:bg-[#070b14]/80">
@@ -186,27 +129,18 @@ export function AttendanceActionSheet() {
               })}
             </div>
 
-            {gestureLegend.length > 0 && (
-              <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3 dark:border-white/10 dark:bg-slate-950/40">
-                <p className="text-center font-mono text-[10px] uppercase tracking-wider text-cyan-600/70 dark:text-cyan-400/60">
-                  gesture control
-                </p>
-                <div className="mt-1.5 flex justify-center gap-4">
-                  {gestureLegend.map(([gesture, status]) => (
-                    <span
-                      key={gesture}
-                      className={`text-xs transition ${
-                        detectedGesture === gesture
-                          ? "scale-110 font-semibold text-cyan-600 dark:text-cyan-400"
-                          : "text-slate-500 dark:text-slate-400"
-                      }`}
-                    >
-                      {GESTURE_EMOJI[gesture]} {status}
-                    </span>
-                  ))}
-                </div>
-              </div>
+            {errorMessage && (
+              <p className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-400">
+                {errorMessage}
+              </p>
             )}
+
+            <div className="mt-5">
+              <GestureGuide
+                detectedGesture={detectedGesture}
+                title="カメラに手をかざすと、ジェスチャーでも記録できます"
+              />
+            </div>
           </>
         )}
       </div>

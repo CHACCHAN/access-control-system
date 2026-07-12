@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Member } from "@/entities/member/api";
-import { recognizeFace, type FaceAuthResult } from "@/shared/lib/visionApi";
+import { recognizeFace } from "@/shared/lib/visionApi";
 import { useSettings } from "@/shared/hooks/useSettings";
 import type { EnrolledFace } from "./FaceAuthContext";
 
@@ -20,10 +20,14 @@ interface UseFaceRecognitionLoopParams {
   members: Member[];
   enrolledFaces: EnrolledFace[];
   active: boolean;
+  /**
+   * 一致メンバーを確定して確認カードを出すかどうか。顔登録中は false にして、
+   * 検出の可視化(Rust がフレームへ描く枠・ランドマーク)だけを走らせる。
+   */
+  enableMatch?: boolean;
 }
 
 interface UseFaceRecognitionLoopResult {
-  overlayCanvasRef: RefObject<HTMLCanvasElement | null>;
   hint: FaceScanHint;
   /** Rust側で推論を実行している最中かどうか(「推論中」インジケータ用) */
   isInferring: boolean;
@@ -32,79 +36,16 @@ interface UseFaceRecognitionLoopResult {
 }
 
 /**
- * 検出結果(Rustから返るbboxとスコア)をカメラ映像の上に重ねて描画する。
- *
- * カメラ映像(img/video)は object-cover でコンテナに合わせて拡大・切り抜き
- * されるため、canvas はコンテナの実表示サイズに合わせ、フレーム座標を
- * object-cover と同じ「大きい方の倍率で拡大して中央寄せ」の変換で表示座標へ
- * 写像してから描く。以前は canvas 自体に object-cover を効かせてフレーム座標の
- * まま描いていたが、環境によって映像とズレるためJS側で座標変換する方式にした。
- */
-function drawDetectionOverlay(
-  canvas: HTMLCanvasElement | null,
-  result: FaceAuthResult | null,
-) {
-  if (!canvas) return;
-
-  // 表示サイズ(CSSピクセル)。高DPI環境でも滲まないよう内部解像度は dpr 倍にする
-  const dpr = window.devicePixelRatio || 1;
-  const viewWidth = canvas.clientWidth;
-  const viewHeight = canvas.clientHeight;
-  if (viewWidth === 0 || viewHeight === 0) return;
-  if (canvas.width !== Math.round(viewWidth * dpr) || canvas.height !== Math.round(viewHeight * dpr)) {
-    canvas.width = Math.round(viewWidth * dpr);
-    canvas.height = Math.round(viewHeight * dpr);
-  }
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, viewWidth, viewHeight);
-  if (!result?.faceDetected || !result.bbox || !result.frameWidth || !result.frameHeight) return;
-
-  // object-cover と同じ変換: 縦横で大きい方の倍率に合わせ、はみ出す分は中央寄せで切れる
-  const scale = Math.max(viewWidth / result.frameWidth, viewHeight / result.frameHeight);
-  const offsetX = (viewWidth - result.frameWidth * scale) / 2;
-  const offsetY = (viewHeight - result.frameHeight * scale) / 2;
-
-  const x = offsetX + result.bbox[0] * scale;
-  const y = offsetY + result.bbox[1] * scale;
-  const boxWidth = result.bbox[2] * scale;
-  const boxHeight = result.bbox[3] * scale;
-
-  // アクセントカラー設定(App.css の --color-cyan-400 差し替え)に追従させる
-  const accent =
-    getComputedStyle(document.documentElement).getPropertyValue("--color-cyan-400").trim() ||
-    "#38bdf8";
-
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x, y, boxWidth, boxHeight);
-
-  const label = result.detScore.toFixed(2);
-  ctx.font = "600 13px system-ui, sans-serif";
-  const labelWidth = ctx.measureText(label).width + 10;
-  const labelY = Math.max(y - 20, 0);
-  ctx.fillStyle = accent;
-  ctx.fillRect(x, labelY, labelWidth, 18);
-  ctx.save();
-  ctx.translate(x + 5, labelY + 13);
-  // 映像がCSSで左右反転表示されるため、ラベル文字は再反転して読めるようにする
-  ctx.scale(-1, 1);
-  ctx.textAlign = "right";
-  ctx.fillStyle = "#0f172a";
-  ctx.fillText(label, 0, 0);
-  ctx.restore();
-}
-
-/**
  * 一定間隔でRust側の顔認証コマンド(recognize_face)を呼び、結果に応じて
- * ヒント表示・一致メンバーの提示を行うフック。検出・照合の処理自体は
- * 全てRust側で行われ、ここでは結果のハンドリングだけを行う。
+ * ヒント表示・一致メンバーの提示を行うフック。検出・照合の処理も、検出結果を
+ * カメラ映像へ重ねる描画も全てRust側で行う(recognize_face を呼ぶこと自体が
+ * Rust側のオーバーレイ更新のトリガーになる)。ここでは結果のハンドリングだけを行う。
  */
 export function useFaceRecognitionLoop({
   members,
   enrolledFaces,
   active,
+  enableMatch = true,
 }: UseFaceRecognitionLoopParams): UseFaceRecognitionLoopResult {
   const { settings } = useSettings();
   // 推論はRust側(i7-3770想定)で数百ms かかるため、過度なポーリングに
@@ -121,11 +62,9 @@ export function useFaceRecognitionLoop({
   // 連続一致カウント(同じ userId が続いた回数)
   const matchStreakRef = useRef<{ userId: string; count: number } | null>(null);
   const errorLoggedRef = useRef(false);
-  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     if (!active) {
-      drawDetectionOverlay(overlayCanvasRef.current, null);
       missCountRef.current = 0;
       matchStreakRef.current = null;
       return;
@@ -146,7 +85,11 @@ export function useFaceRecognitionLoop({
         );
         errorLoggedRef.current = false;
 
-        drawDetectionOverlay(overlayCanvasRef.current, result);
+        // 登録中(enableMatch=false)は検出の可視化だけ走らせ、確定はしない
+        if (!enableMatch) {
+          setHint(result.faceDetected ? null : "scanning");
+          return;
+        }
 
         if (matchedMember) {
           // 確認カード表示中は照合をやり直さず、対象が離れたかどうかだけ見る
@@ -210,7 +153,6 @@ export function useFaceRecognitionLoop({
           errorLoggedRef.current = true;
           console.error("[face-recognition] 推論エラー:", err);
         }
-        drawDetectionOverlay(overlayCanvasRef.current, null);
         setHint("scanning");
       } finally {
         isCheckingRef.current = false;
@@ -219,12 +161,12 @@ export function useFaceRecognitionLoop({
     }, detectionIntervalMs);
 
     return () => window.clearInterval(timer);
-  }, [active, matchedMember, enrolledFaces, members, detectionIntervalMs, stableCount]);
+  }, [active, enableMatch, matchedMember, enrolledFaces, members, detectionIntervalMs, stableCount]);
 
   function dismissMatch() {
     missCountRef.current = 0;
     setMatchedMember(null);
   }
 
-  return { overlayCanvasRef, hint, isInferring, matchedMember, dismissMatch };
+  return { hint, isInferring, matchedMember, dismissMatch };
 }

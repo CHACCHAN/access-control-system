@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { useAppVersion } from "@/shared/hooks/useAppVersion";
-import { PATTERN_CLASS, useSettings, type AppSettings } from "@/shared/hooks/useSettings";
-import { applyAccentAttribute, applyUiScale } from "@/shared/theme/ThemeContext";
+import { useSettings, type AppSettings } from "@/shared/hooks/useSettings";
+import { applyAccentAttribute } from "@/shared/theme/ThemeContext";
+import { playUiSound } from "@/shared/lib/uiSound";
+import { ConfirmDialog } from "@/shared/ui/ConfirmDialog";
 import { restartComputer } from "@/widgets/system-control-panel/api";
 import {
   ArrowLeftIcon,
@@ -65,7 +67,7 @@ const SECTIONS: { id: SectionId; label: string; en: string; icon: IconType }[] =
  * 自動再起動する(旧 SettingsPanel の挙動を踏襲)。
  */
 export function SettingsPage({ onClose }: SettingsPageProps) {
-  const { settings, updateSettings } = useSettings();
+  const { settings, updateSettings, isLoading: isSettingsLoading } = useSettings();
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [activeSection, setActiveSection] = useState<SectionId>("general");
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -73,9 +75,14 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const [isConfirmingSave, setIsConfirmingSave] = useState(false);
   const version = useAppVersion();
 
+  // draft の初期化は設定の非同期ロード完了時に一度だけ行う。
+  // UIスケール・音量・テーマなど「保存不要で即反映」の項目は updateSettings を
+  // 直接呼ぶ(=settings が変わる)ため、settings 変更のたびに draft を丸ごと
+  // 同期すると他セクションの編集中の内容が消えてしまう。
   useEffect(() => {
-    setDraft(settings);
-  }, [settings]);
+    if (!isSettingsLoading) setDraft(settings);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSettingsLoading]);
 
   // アクセントカラーは保存前でも編集中の値をライブプレビューする。
   // 設定画面を閉じたら(保存の有無に関わらず)保存済みの値へ戻す。
@@ -88,25 +95,13 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     return () => applyAccentAttribute(savedAccent);
   }, [savedAccent]);
 
-  // UI 拡大率も同様にライブプレビューし、閉じたら保存済みの値へ戻す。
-  const savedUiScale = settings.uiScale;
-  const draftUiScale = draft.uiScale;
-  useEffect(() => {
-    applyUiScale(draftUiScale);
-  }, [draftUiScale]);
-  useEffect(() => {
-    return () => applyUiScale(savedUiScale);
-  }, [savedUiScale]);
-
-  // 背景パターンも編集中の値でプレビュー(このページの背景に反映される)
-  const previewPattern = PATTERN_CLASS[draft.appearance.backgroundPattern] ?? "cyber-grid";
-
   // 編集内容が保存済みの設定と異なるか(未保存の変更があるか)
   const isDirty = JSON.stringify(draft) !== JSON.stringify(settings);
 
   async function commitSave() {
     setIsConfirmingSave(false);
     await updateSettings(draft);
+    playUiSound("success");
     setSavedAt(Date.now());
     // 設定変更(特にエンドポイント類)を確実に反映させるため、実機では保存後に自動再起動する
     if (isTauri()) {
@@ -127,10 +122,11 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-50 text-slate-900 animate-page-in dark:bg-[#070b14] dark:text-slate-100">
-      {/* 背景装飾: 背景パターン(設定に追従) + 上部のアクセントグロー + 走査線 */}
-      {previewPattern && (
-        <div className={`${previewPattern} pointer-events-none absolute inset-0 opacity-70`} />
-      )}
+      {/* 背景装飾: 格子 + 上部のアクセントグロー + 走査線。
+          設定の背景パターン(アニメーション含む)はトップページ専用の装飾のため、
+          この画面では常に静的な格子に固定する(選択肢のプレビューは
+          デザインセクション内のサムネイルで確認できる)。 */}
+      <div className="cyber-grid pointer-events-none absolute inset-0 opacity-70" />
       <div
         className="pointer-events-none absolute inset-x-0 top-0 h-64 opacity-60 dark:opacity-100"
         style={{
@@ -254,40 +250,25 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         </form>
       </div>
 
-      {/* 保存 → 再起動の確認モーダル(実機のみ) */}
+      {/* 保存 → 再起動の確認モーダル(実機のみ)。電源操作と共通の確認ダイアログ部品 */}
       {isConfirmingSave && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm animate-fade-in">
-          <div className="cyber-corners w-full max-w-sm rounded-xl border border-cyan-400/20 bg-white p-6 shadow-2xl animate-scale-in dark:bg-slate-900">
-            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.2em] text-amber-500">
-              confirm
-            </p>
-            <p className="mt-2 text-sm text-slate-700 dark:text-slate-200">
-              保存すると設定を反映するため端末を再起動します。よろしいですか？
-            </p>
-            <div className="mt-5 flex gap-2">
-              <button
-                type="button"
-                onClick={() => setIsConfirmingSave(false)}
-                className="flex-1 rounded-lg border border-slate-300 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/5"
-              >
-                キャンセル
-              </button>
-              <button
-                type="button"
-                onClick={() => void commitSave()}
-                disabled={isRestarting}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-amber-500 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isRestarting ? (
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                ) : (
-                  <CheckIcon className="h-4 w-4" />
-                )}
-                保存して再起動
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          eyebrow="confirm"
+          eyebrowClass="text-amber-500"
+          borderClass="border-slate-200 dark:border-amber-500/25"
+          title="設定を保存して再起動しますか？"
+          message="保存した設定を反映するため、端末を自動再起動します"
+          confirmLabel={
+            <>
+              <CheckIcon className="h-4 w-4" />
+              保存して再起動
+            </>
+          }
+          confirmButtonClass="bg-amber-500 hover:bg-amber-400 text-white"
+          busy={isRestarting}
+          onCancel={() => setIsConfirmingSave(false)}
+          onConfirm={() => void commitSave()}
+        />
       )}
     </div>
   );

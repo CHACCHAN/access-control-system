@@ -8,19 +8,23 @@
 mod face;
 mod geometry;
 mod gesture;
+mod overlay;
 mod paths;
 mod runtime;
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Instant;
-use tauri::{AppHandle, Manager, State};
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
 
 use crate::camera_capture::SharedFrame;
-use face::FaceEngine;
+use face::{align_kps_from_106, FaceEngine};
 use geometry::RgbBuf;
 use gesture::{Gesture, GestureEngine};
+pub use overlay::OverlayState;
+use overlay::{FaceOverlay, HandOverlay};
 
 // 照合閾値・マージン・最小顔サイズ比率は設定(settings.json の performance)で
 // 調整できる。既定値は crate::settings::PerfSettings::default() を参照。
@@ -208,9 +212,11 @@ pub async fn recognize_face(
     app: AppHandle,
     state: State<'_, VisionState>,
     frame_state: State<'_, SharedFrame>,
+    overlay_state: State<'_, OverlayState>,
 ) -> Result<FaceAuthResult, String> {
     let state = state.inner().clone();
     let shared = frame_state.inner().clone();
+    let overlay = overlay_state.inner().clone();
 
     tauri::async_runtime::spawn_blocking(move || {
         state.ensure_loaded(&app)?;
@@ -237,72 +243,83 @@ pub async fn recognize_face(
         };
 
         let detections = engine.detect(&frame)?;
-        let Some(best) = detections.first() else {
+        // best の借用をここで終わらせ、以降 engine を可変で使えるようにする
+        let Some((best_bbox, best_kps, best_score)) =
+            detections.first().map(|d| (d.bbox, d.kps, d.score))
+        else {
+            // 顔が消えたらオーバーレイも消す
+            overlay.clear_face();
             return Ok(result);
         };
         result.face_detected = true;
-        result.det_score = best.score;
+        result.det_score = best_score;
         result.bbox = Some([
-            best.bbox[0],
-            best.bbox[1],
-            best.bbox[2] - best.bbox[0],
-            best.bbox[3] - best.bbox[1],
+            best_bbox[0],
+            best_bbox[1],
+            best_bbox[2] - best_bbox[0],
+            best_bbox[3] - best_bbox[1],
         ]);
 
+        // オーバーレイ描画用の106点ランドマーク(照合の有無に関わらず常に取得)。
+        // これはアライメント用の5点導出にも再利用する。
+        let landmarks = engine.landmarks_106(&frame, &best_bbox)?.unwrap_or_default();
+
         // 顔が小さすぎる(遠い)うちは高コストな照合はしない
-        let face_width_ratio = (best.bbox[2] - best.bbox[0]) / frame.width as f32;
-        if face_width_ratio < perf.min_face_width_ratio {
-            return Ok(result);
-        }
+        let face_width_ratio = (best_bbox[2] - best_bbox[0]) / frame.width as f32;
+        if face_width_ratio >= perf.min_face_width_ratio {
+            let enrolled = state
+                .0
+                .enrolled
+                .read()
+                .map_err(|_| "内部状態のロックに失敗しました")?
+                .clone();
+            if !enrolled.is_empty() {
+                // 106点からアライメント5点を導出(失敗時は SCRFD の5点)
+                let kps = align_kps_from_106(&landmarks, &best_bbox).unwrap_or(best_kps);
+                let embedding = engine.embed(&frame, &kps)?;
 
-        let enrolled = state
-            .0
-            .enrolled
-            .read()
-            .map_err(|_| "内部状態のロックに失敗しました")?
-            .clone();
-        if enrolled.is_empty() {
-            return Ok(result);
-        }
-
-        // 106点ランドマークでアライメントを補正(失敗時は SCRFD の5点)
-        let kps = engine
-            .refine_keypoints(&frame, &best.bbox)?
-            .unwrap_or(best.kps);
-        let embedding = engine.embed(&frame, &kps)?;
-
-        // 1:N 照合(全件コサイン類似度)
-        let mut best_match: Option<(&EnrolledFace, f32)> = None;
-        let mut second_score = f32::MIN;
-        for face in &enrolled {
-            let score = face::cosine_similarity(&embedding, &face.embedding);
-            match &best_match {
-                Some((_, top)) if score <= *top => {
-                    if score > second_score {
-                        second_score = score;
+                // 1:N 照合(全件コサイン類似度)
+                let mut best_match: Option<(&EnrolledFace, f32)> = None;
+                let mut second_score = f32::MIN;
+                for face in &enrolled {
+                    let score = face::cosine_similarity(&embedding, &face.embedding);
+                    match &best_match {
+                        Some((_, top)) if score <= *top => {
+                            if score > second_score {
+                                second_score = score;
+                            }
+                        }
+                        _ => {
+                            if let Some((_, top)) = &best_match {
+                                second_score = *top;
+                            }
+                            best_match = Some((face, score));
+                        }
                     }
                 }
-                _ => {
-                    if let Some((_, top)) = &best_match {
-                        second_score = *top;
+
+                if let Some((face, score)) = best_match {
+                    result.confidence = score;
+                    let ambiguous =
+                        enrolled.len() > 1 && (score - second_score) < perf.match_margin;
+                    if score >= perf.match_threshold && !ambiguous {
+                        result.recognized = true;
+                        result.user_id = Some(face.username.clone());
                     }
-                    best_match = Some((face, score));
+                    eprintln!(
+                        "[vision] 照合: best={} score={:.3} second={:.3} recognized={}",
+                        face.username, score, second_score, result.recognized
+                    );
                 }
             }
         }
 
-        if let Some((face, score)) = best_match {
-            result.confidence = score;
-            let ambiguous = enrolled.len() > 1 && (score - second_score) < perf.match_margin;
-            if score >= perf.match_threshold && !ambiguous {
-                result.recognized = true;
-                result.user_id = Some(face.username.clone());
-            }
-            eprintln!(
-                "[vision] 照合: best={} score={:.3} second={:.3} recognized={}",
-                face.username, score, second_score, result.recognized
-            );
-        }
+        // 検出結果をオーバーレイ状態へ(カメラキャプチャがフレームへ焼き込む)
+        overlay.set_face(FaceOverlay {
+            bbox: best_bbox,
+            landmarks,
+            recognized: result.recognized,
+        });
 
         eprintln!(
             "[vision] 顔認証パイプライン合計: {}ms",
@@ -366,13 +383,14 @@ fn gesture_status(app: &AppHandle, gesture: Gesture) -> Option<String> {
         Gesture::Rock => "rock",
         Gesture::Scissors => "scissors",
         Gesture::Paper => "paper",
-        Gesture::Unknown => return None,
+        // サムズアップ/ダウンは確認カードの はい/ちがう 用で、在室ステータスには割り当てない
+        Gesture::ThumbsUp | Gesture::ThumbsDown | Gesture::Unknown => return None,
     };
     let default = match gesture {
         Gesture::Rock => DEFAULT_ROCK_STATUS,
         Gesture::Scissors => DEFAULT_SCISSORS_STATUS,
         Gesture::Paper => DEFAULT_PAPER_STATUS,
-        Gesture::Unknown => unreachable!(),
+        _ => unreachable!(),
     };
 
     let configured = app
@@ -401,9 +419,11 @@ pub async fn detect_gesture(
     app: AppHandle,
     state: State<'_, VisionState>,
     frame_state: State<'_, SharedFrame>,
+    overlay_state: State<'_, OverlayState>,
 ) -> Result<GestureResult, String> {
     let state = state.inner().clone();
     let shared = frame_state.inner().clone();
+    let overlay = overlay_state.inner().clone();
     let app_for_map = app.clone();
 
     let (hand, total_ms) = tauri::async_runtime::spawn_blocking(move || {
@@ -428,6 +448,8 @@ pub async fn detect_gesture(
     eprintln!("[vision] ジェスチャー認識パイプライン合計: {total_ms}ms");
 
     let Some(hand) = hand else {
+        // 手が消えたらオーバーレイも消す
+        overlay.clear_hand();
         return Ok(GestureResult {
             hand_detected: false,
             gesture: "Unknown".to_string(),
@@ -436,12 +458,105 @@ pub async fn detect_gesture(
         });
     };
 
+    // 手の骨格をオーバーレイ状態へ(カメラキャプチャがフレームへ焼き込む)
+    overlay.set_hand(HandOverlay {
+        bbox: hand.palm_bbox,
+        points: hand.points_frame.clone(),
+    });
+
     Ok(GestureResult {
         hand_detected: true,
         gesture: format!("{:?}", hand.gesture),
         confidence: hand.confidence,
         room_status: gesture_status(&app_for_map, hand.gesture),
     })
+}
+
+// ---- 消灯中の人感復帰ウォッチャー ----
+//
+// ディスプレイを DPMS で物理消灯すると、X の描画クロック停止に伴って
+// WebView(WebKitGTK)側のタイマー処理が間引き・停止されることがあり、
+// フロント(JS)主導のポーリングでは復帰できない場合がある。
+// そのため消灯中の顔検出は WebView に依存しない Rust 専用スレッドで行い、
+// 検出したら Rust 自身が画面を点灯してからフロントへイベントで通知する。
+
+/// 顔がフレーム幅のこの比率以上の大きさで写ったら「人が近づいた」とみなす
+const WAKE_FACE_WIDTH_RATIO: f32 = 0.10;
+/// 消灯中の顔検出ポーリング間隔
+const WAKE_POLL_INTERVAL: Duration = Duration::from_millis(1500);
+/// 人感復帰時にフロントへ送るイベント名
+const WAKE_EVENT: &str = "display-woken";
+
+#[derive(Clone, Default)]
+pub struct WakeWatchState(Arc<AtomicBool>);
+
+/// 人感復帰の監視を開始する(消灯開始時にフロントから呼ぶ)。
+/// 既に監視中なら何もしない。人を検出すると画面を点灯し、`display-woken`
+/// イベントを emit して自動的に監視を終了する。
+#[tauri::command]
+pub fn start_wake_watch(
+    app: AppHandle,
+    state: State<'_, VisionState>,
+    frame_state: State<'_, SharedFrame>,
+    watch: State<'_, WakeWatchState>,
+) -> Result<(), String> {
+    if watch.0.swap(true, Ordering::SeqCst) {
+        return Ok(()); // 既に監視中
+    }
+    let flag = watch.0.clone();
+    let state = state.inner().clone();
+    let shared = frame_state.inner().clone();
+
+    std::thread::spawn(move || {
+        eprintln!("[wake-watch] 人感復帰の監視を開始");
+        while flag.load(Ordering::SeqCst) {
+            std::thread::sleep(WAKE_POLL_INTERVAL);
+            if !flag.load(Ordering::SeqCst) {
+                break;
+            }
+            if state.ensure_loaded(&app).is_err() {
+                continue;
+            }
+            // 検出とロックはこのブロック内で完結させ、sleep 中はロックを持たない
+            let ratio = {
+                let Ok(frame) = latest_frame(&shared) else {
+                    continue;
+                };
+                let Ok(mut guard) = state.0.face.lock() else {
+                    continue;
+                };
+                let Some(engine) = guard.as_mut() else {
+                    continue;
+                };
+                let Ok(detections) = engine.detect(&frame) else {
+                    continue;
+                };
+                let Some(best) = detections.first() else {
+                    continue;
+                };
+                (best.bbox[2] - best.bbox[0]) / frame.width as f32
+            };
+
+            eprintln!(
+                "[wake-watch] 消灯中に顔検出: ratio={ratio:.2} (復帰しきい値 {WAKE_FACE_WIDTH_RATIO})"
+            );
+            if ratio >= WAKE_FACE_WIDTH_RATIO {
+                crate::display_force_on();
+                let _ = app.emit(WAKE_EVENT, ());
+                flag.store(false, Ordering::SeqCst);
+                eprintln!("[wake-watch] 人を検出 → 画面を点灯しました");
+                break;
+            }
+        }
+        eprintln!("[wake-watch] 監視を終了");
+    });
+    Ok(())
+}
+
+/// 人感復帰の監視を停止する(操作による復帰などで消灯が解除されたとき)。
+#[tauri::command]
+pub fn stop_wake_watch(watch: State<'_, WakeWatchState>) {
+    watch.0.store(false, Ordering::SeqCst);
 }
 
 #[cfg(test)]
@@ -466,11 +581,17 @@ mod tests {
         paths::ModelPaths::resolve(None).expect("モデルが未配置です(setup-models.sh を実行してください)")
     }
 
-    /// 顔が写っていない画像(リポジトリ同梱の image.jpg = CPUパッケージの写真)
-    /// では顔が検出されないこと、およびパイプラインがクラッシュしないこと。
+    /// 顔が写っていない画像では顔が検出されないこと、およびパイプラインが
+    /// クラッシュしないこと。画像(リポジトリ直下の image.jpg)が無い環境では
+    /// スキップ扱い(他の *_TEST_IMAGE 系テストと同じ方針)。
     #[test]
     fn face_pipeline_rejects_non_face_image() {
-        let frame = load_test_image(concat!(env!("CARGO_MANIFEST_DIR"), "/../image.jpg"));
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../image.jpg");
+        if !std::path::Path::new(path).exists() {
+            eprintln!("image.jpg が無いためスキップ");
+            return;
+        }
+        let frame = load_test_image(path);
         let mut engine = FaceEngine::load(&model_paths()).expect("モデルロード失敗");
         let detections = engine.detect(&frame).expect("検出失敗");
         assert!(

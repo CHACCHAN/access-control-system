@@ -43,6 +43,11 @@ export const DEFAULT_GESTURE_STATUS_MAP: GestureStatusMap = {
   paper: "帰宅",
 };
 
+// 顔認証の確認カード(「◯◯さんですか?」)で「ちがう」を意味するジェスチャー。
+// 分類はランドマークからのルールベース(新しいMLモデルは不要)。空文字は無効。
+export type RejectGesture = "ThumbsDown" | "";
+export const DEFAULT_REJECT_GESTURE: RejectGesture = "ThumbsDown";
+
 // パフォーマンス調整。推論のポーリング間隔やカメラ配信のパラメータを
 // 端末スペックに合わせて設定画面から調整できるようにする。
 // camera* / match* / minFaceWidthRatio は Rust 側も settings.json から読むため、
@@ -84,20 +89,36 @@ export const DEFAULT_PERFORMANCE: PerformanceSettings = {
 // 丸ごと差し替える方式(App.css の :root[data-accent=...])のため、
 // 追加する場合は App.css にも対応するパレットを足すこと。
 export type AccentColor = "cyan" | "emerald" | "violet" | "rose" | "amber" | "blue";
-export type BackgroundPattern = "grid" | "dots" | "diagonal" | "none";
+// circuit / signal はアニメーション付き(電気信号が流れる演出)
+export type BackgroundPattern =
+  | "grid"
+  | "dots"
+  | "diagonal"
+  | "circuit"
+  | "signal"
+  | "none";
 export type MemberListLayout = "grid" | "compact" | "list";
 
-// 背景パターン → 装飾クラス(App.css)の対応。トップ画面と設定画面で共用する。
+// 背景パターン → 装飾クラス(App.css)の対応。
+// 静的パターン(grid/dots/diagonal)はトップ画面全体に敷き、
+// アニメーション付き(circuit/signal)は右側(顔認証パネル)の背景にのみ描画する。
 export const PATTERN_CLASS: Record<BackgroundPattern, string> = {
   grid: "cyber-grid",
   dots: "cyber-dots",
   diagonal: "cyber-diagonal",
+  circuit: "cyber-circuit",
+  signal: "cyber-signal",
   none: "",
 };
 
+/** アニメーション付きパターン(顔認証パネルの背景にのみ描画する)かどうか */
+export function isAnimatedPattern(pattern: BackgroundPattern): boolean {
+  return pattern === "circuit" || pattern === "signal";
+}
+
 export interface AppearanceSettings {
   accentColor: AccentColor;
-  /** トップ画面と設定画面に敷く背景パターン */
+  /** 背景パターン。静的はトップ画面全体、アニメ付きは顔認証パネルのみに描画 */
   backgroundPattern: BackgroundPattern;
   /** メンバー一覧の並べ方(グリッド/3列コンパクト/1列リスト) */
   memberListLayout: MemberListLayout;
@@ -105,6 +126,8 @@ export interface AppearanceSettings {
   memberPanelBg: string;
   /** トップ画面右(顔認証)の背景色。空文字は既定のまま */
   authPanelBg: string;
+  /** 顔登録画面(左パネル差し替え)の背景色。空文字は既定のまま */
+  registerPanelBg: string;
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -113,6 +136,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   memberListLayout: "grid",
   memberPanelBg: "",
   authPanelBg: "",
+  registerPanelBg: "",
 };
 
 // UI 全体の拡大率。ルート要素の font-size(rem 基準)を倍率で切り替えて、
@@ -130,12 +154,26 @@ export function clampUiScale(scale: number): number {
   return Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, scale));
 }
 
+/** ハードウェア音量(ALSA、0〜100%)の既定値 */
+export const HARDWARE_VOLUME_DEFAULT = 80;
+
+/** ハードウェア音量を 0〜100 にクランプする(不正値は既定値) */
+export function clampHardwareVolume(volume: number): number {
+  if (!Number.isFinite(volume)) return HARDWARE_VOLUME_DEFAULT;
+  return Math.min(100, Math.max(0, Math.round(volume)));
+}
+
 export interface AppSettings {
   theme: Theme;
   // UI 全体の拡大率(1.0 = 等倍)
   uiScale: number;
+  // スピーカーのハードウェア音量(ALSA Master、0〜100%)。
+  // ソフトウェア音量ではなく端末の実音量。起動時と設定変更時に amixer で反映する。
+  hardwareVolume: number;
   rebootSchedule: string;
-  screenOffSchedule: string;
+  // 自動消灯までの無操作時間(分)。「時刻」ではなく「時間(経過)」で指定する。
+  // 0 は無効。操作・人物接近(顔検出)で復帰する。
+  screenOffMinutes: number;
   getEndpoint: string;
   // 顔特徴ベクトル登録 API(POST {postEndpoint}/{username})
   postEndpoint: string;
@@ -151,6 +189,8 @@ export interface AppSettings {
   wsSignalValue: string;
   // ジェスチャー認識(Rust側)の結果を在室ステータスへ変換するマッピング
   gestureStatusMap: GestureStatusMap;
+  // 確認カードで「ちがう」を意味するジェスチャー("" は無効)
+  rejectGesture: RejectGesture;
   // 推論間隔・カメラ配信・照合パラメータの調整
   performance: PerformanceSettings;
   // アクセントカラー・背景・レイアウトのカスタマイズ
@@ -160,8 +200,9 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "dark",
   uiScale: UI_SCALE_DEFAULT,
+  hardwareVolume: HARDWARE_VOLUME_DEFAULT,
   rebootSchedule: "",
-  screenOffSchedule: "",
+  screenOffMinutes: 0,
   getEndpoint: "",
   postEndpoint: "",
   attendanceEndpoint: "",
@@ -172,6 +213,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   wsSignalField: "message",
   wsSignalValue: "update",
   gestureStatusMap: DEFAULT_GESTURE_STATUS_MAP,
+  rejectGesture: DEFAULT_REJECT_GESTURE,
   performance: DEFAULT_PERFORMANCE,
   appearance: DEFAULT_APPEARANCE,
 };
@@ -208,6 +250,11 @@ export async function loadSettings(): Promise<AppSettings> {
       ...stored,
       // 不正・範囲外の拡大率で画面が壊れないよう読み込み時にクランプする
       uiScale: clampUiScale(stored.uiScale ?? UI_SCALE_DEFAULT),
+      hardwareVolume: clampHardwareVolume(stored.hardwareVolume ?? HARDWARE_VOLUME_DEFAULT),
+      // 旧バージョンの時刻指定(screenOffSchedule)からの移行時は未設定(0=無効)になる
+      screenOffMinutes: Number.isFinite(stored.screenOffMinutes)
+        ? Math.max(0, Math.round(stored.screenOffMinutes))
+        : 0,
       // ネストしたオブジェクトは浅いマージだと保存済みの値で丸ごと
       // 置き換わり、後から追加したキーの既定値が失われるため個別にマージする
       gestureStatusMap: {

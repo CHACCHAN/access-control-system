@@ -177,14 +177,14 @@ impl FaceEngine {
         Ok(results)
     }
 
-    /// 2d106det によるランドマーク推定から、ArcFace アライメント用の
-    /// 5点(目の中心×2・鼻先・口角×2)を返す。失敗時は None(呼び出し側で
-    /// SCRFD の5点にフォールバックする)。
-    pub fn refine_keypoints(
+    /// 2d106det による106点ランドマークを推定し、全点を元フレーム座標で返す。
+    /// bbox が極端に小さい場合は None。オーバーレイ描画とアライメント点導出の
+    /// 両方の元データになる。
+    pub fn landmarks_106(
         &mut self,
         frame: &RgbBuf,
         bbox: &[f32; 4],
-    ) -> Result<Option<[[f32; 2]; 5]>, String> {
+    ) -> Result<Option<Vec<[f32; 2]>>, String> {
         let started = Instant::now();
         let w = bbox[2] - bbox[0];
         let h = bbox[3] - bbox[1];
@@ -225,46 +225,31 @@ impl FaceEngine {
 
         // 出力は [-1, 1] 正規化座標 → クロップ座標 → 逆変換で元フレーム座標へ
         let inv = invert_affine(&m);
-        let to_frame = |p: [f32; 2]| -> [f32; 2] {
-            let cx = (p[0] + 1.0) * half;
-            let cy = (p[1] + 1.0) * half;
-            let (fx, fy) = apply_affine(&inv, cx, cy);
-            [fx, fy]
-        };
-
-        let mean_of = |range: std::ops::RangeInclusive<usize>| -> [f32; 2] {
-            let mut sx = 0.0f32;
-            let mut sy = 0.0f32;
-            let count = range.clone().count() as f32;
-            for i in range {
-                let p = to_frame([pred[[i, 0]], pred[[i, 1]]]);
-                sx += p[0];
-                sy += p[1];
-            }
-            [sx / count, sy / count]
-        };
-
-        let kps = [
-            mean_of(LMK_EYE_LEFT_RANGE),
-            mean_of(LMK_EYE_RIGHT_RANGE),
-            to_frame([pred[[LMK_NOSE_TIP, 0]], pred[[LMK_NOSE_TIP, 1]]]),
-            to_frame([pred[[LMK_MOUTH_LEFT, 0]], pred[[LMK_MOUTH_LEFT, 1]]]),
-            to_frame([pred[[LMK_MOUTH_RIGHT, 0]], pred[[LMK_MOUTH_RIGHT, 1]]]),
-        ];
-
-        // 妥当性チェック: 5点全てが bbox を少し広げた範囲に収まっていること
-        let margin = w.max(h) * 0.5;
-        let in_range = kps.iter().all(|p| {
-            p[0].is_finite()
-                && p[1].is_finite()
-                && p[0] >= bbox[0] - margin
-                && p[0] <= bbox[2] + margin
-                && p[1] >= bbox[1] - margin
-                && p[1] <= bbox[3] + margin
-        });
+        let pts: Vec<[f32; 2]> = (0..106)
+            .map(|i| {
+                let cx = (pred[[i, 0]] + 1.0) * half;
+                let cy = (pred[[i, 1]] + 1.0) * half;
+                let (fx, fy) = apply_affine(&inv, cx, cy);
+                [fx, fy]
+            })
+            .collect();
 
         eprintln!("[vision] 106点ランドマーク: {}ms", elapsed_ms(started));
-        Ok(if in_range { Some(kps) } else { None })
+        Ok(Some(pts))
+    }
+
+    /// 106点ランドマークから ArcFace アライメント用の5点(目の中心×2・鼻先・
+    /// 口角×2)を導く。妥当性チェック(bbox 近傍に収まるか)に通らなければ
+    /// None(呼び出し側で SCRFD の5点へフォールバックする)。
+    pub fn refine_keypoints(
+        &mut self,
+        frame: &RgbBuf,
+        bbox: &[f32; 4],
+    ) -> Result<Option<[[f32; 2]; 5]>, String> {
+        let Some(pts) = self.landmarks_106(frame, bbox)? else {
+            return Ok(None);
+        };
+        Ok(align_kps_from_106(&pts, bbox))
     }
 
     /// 5点キーポイントで ArcFace 基準にアライメントし、512次元の
@@ -299,6 +284,50 @@ impl FaceEngine {
         let embedding = flat.into_iter().map(|v| v / norm).collect();
         eprintln!("[vision] embedding抽出: {}ms", elapsed_ms(started));
         Ok(embedding)
+    }
+}
+
+/// 106点ランドマーク(フレーム座標)から ArcFace アライメント用の5点を導く。
+/// 妥当でなければ None。
+pub fn align_kps_from_106(pts: &[[f32; 2]], bbox: &[f32; 4]) -> Option<[[f32; 2]; 5]> {
+    if pts.len() < 106 {
+        return None;
+    }
+    let mean_of = |range: std::ops::RangeInclusive<usize>| -> [f32; 2] {
+        let mut sx = 0.0f32;
+        let mut sy = 0.0f32;
+        let count = range.clone().count() as f32;
+        for i in range {
+            sx += pts[i][0];
+            sy += pts[i][1];
+        }
+        [sx / count, sy / count]
+    };
+
+    let kps = [
+        mean_of(LMK_EYE_LEFT_RANGE),
+        mean_of(LMK_EYE_RIGHT_RANGE),
+        pts[LMK_NOSE_TIP],
+        pts[LMK_MOUTH_LEFT],
+        pts[LMK_MOUTH_RIGHT],
+    ];
+
+    // 妥当性チェック: 5点全てが bbox を少し広げた範囲に収まっていること
+    let w = bbox[2] - bbox[0];
+    let h = bbox[3] - bbox[1];
+    let margin = w.max(h) * 0.5;
+    let in_range = kps.iter().all(|p| {
+        p[0].is_finite()
+            && p[1].is_finite()
+            && p[0] >= bbox[0] - margin
+            && p[0] <= bbox[2] + margin
+            && p[1] >= bbox[1] - margin
+            && p[1] <= bbox[3] + margin
+    });
+    if in_range {
+        Some(kps)
+    } else {
+        None
     }
 }
 

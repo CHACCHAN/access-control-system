@@ -2,29 +2,40 @@ import { useEffect, useRef, useState } from "react";
 import { MemberListPanel } from "@/widgets/member-list-panel/MemberListPanel";
 import { FaceAuthPanel } from "@/widgets/face-auth-panel/FaceAuthPanel";
 import { AttendanceActionSheet } from "@/widgets/attendance-action-sheet/AttendanceActionSheet";
-import { SystemControlPanel } from "@/widgets/system-control-panel/SystemControlPanel";
 import { restartComputer } from "@/widgets/system-control-panel/api";
 import { BootCheckScreen } from "@/widgets/boot-check-screen/BootCheckScreen";
 import { SettingsPage } from "@/widgets/settings-page/SettingsPage";
+import { StatusFooter } from "@/widgets/status-footer/StatusFooter";
 import { AppProviders } from "./providers/AppProviders";
 import { useFaceAuth } from "@/features/face-auth/FaceAuthContext";
 import { useKioskSocket } from "@/features/kiosk-socket/useKioskSocket";
 import { ScreenDimmer } from "@/features/screen-dimmer/ScreenDimmer";
 import { useMembers } from "@/entities/member/MemberContext";
-import { PATTERN_CLASS, useSettings } from "@/shared/hooks/useSettings";
+import { isAnimatedPattern, PATTERN_CLASS, useSettings } from "@/shared/hooks/useSettings";
+import { useUiSoundEffects } from "@/shared/hooks/useUiSoundEffects";
+import { applyHardwareVolume } from "@/shared/lib/hardwareVolume";
 import "./App.css";
+
+// 顔認証パネルのモード。register 中は左パネルを顔登録フォームへ差し替える。
+export type AuthMode = "recognize" | "register";
 
 export default function App() {
   const [hasBooted, setHasBooted] = useState(false);
-
-  if (!hasBooted) {
-    return <BootCheckScreen onContinue={() => setHasBooted(true)} />;
-  }
+  // ボタンのクリック/ホバー音(全画面共通・document 委譲)
+  useUiSoundEffects();
 
   return (
-    <AppProviders>
-      <MainScreen />
-    </AppProviders>
+    <>
+      {!hasBooted ? (
+        <BootCheckScreen onContinue={() => setHasBooted(true)} />
+      ) : (
+        <AppProviders>
+          <MainScreen />
+        </AppProviders>
+      )}
+      {/* システム状態フッターは起動チェック中・設定画面中を含む全ページで常駐 */}
+      <StatusFooter />
+    </>
   );
 }
 
@@ -35,9 +46,12 @@ function currentHHMM(): string {
 
 function MainScreen() {
   const { visionError } = useFaceAuth();
-  const { settings } = useSettings();
+  const { settings, isLoading: isSettingsLoading } = useSettings();
   const { refetch } = useMembers();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  // 顔認証パネルのモード。App レベルで持ち、登録中は左パネルを登録フォームに
+  // 差し替えつつ右パネルのカメラ検出可視化を継続させる。
+  const [authMode, setAuthMode] = useState<AuthMode>("recognize");
   const lastFiredKeyRef = useRef<string | null>(null);
 
   useKioskSocket(settings.wsEndpoint, refetch, settings.wsSignalField, settings.wsSignalValue);
@@ -62,13 +76,23 @@ function MainScreen() {
     return () => window.clearInterval(timer);
   }, [settings.rebootSchedule]);
 
-  const patternClass = PATTERN_CLASS[settings.appearance.backgroundPattern] ?? "cyber-grid";
+  // 保存済みのハードウェア音量(ALSA)を起動時に端末へ反映する。
+  // ALSA のミキサー状態は再起動で失われる場合があるため、アプリ側でも保証する。
+  useEffect(() => {
+    if (isSettingsLoading) return;
+    void applyHardwareVolume(settings.hardwareVolume);
+  }, [isSettingsLoading, settings.hardwareVolume]);
+
+  // 静的パターンはトップ画面全体に敷く。アニメーション付き(回路/信号)は
+  // 右側(顔認証パネル)の背景にのみ描画するため、ここでは敷かない。
+  const pattern = settings.appearance.backgroundPattern;
+  const pagePatternClass = isAnimatedPattern(pattern) ? "" : (PATTERN_CLASS[pattern] ?? "cyber-grid");
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-slate-50 dark:bg-[#070b14]">
       {/* トップ画面全体にも設定ページと同じ背景パターンを薄く敷き、統一感を出す */}
-      {patternClass && (
-        <div className={`${patternClass} pointer-events-none absolute inset-0 opacity-60`} />
+      {pagePatternClass && (
+        <div className={`${pagePatternClass} pointer-events-none absolute inset-0 opacity-60`} />
       )}
       {/*
         grid-rows-[minmax(0,1fr)] が無いと、暗黙の行トラックは既定で「コンテンツに
@@ -78,15 +102,18 @@ function MainScreen() {
         「コンテナの高さちょうど・下限0(縮小可)」にし、はみ出た分は各パネル内部の
         overflow-y-auto に処理させる。
       */}
-      <div className="relative z-10 grid h-full grid-cols-2 grid-rows-[minmax(0,1fr)] divide-x divide-slate-200 dark:divide-cyan-400/10 *:min-h-0">
-        <MemberListPanel />
-        <FaceAuthPanel onOpenSettings={() => setIsSettingsOpen(true)} />
+      {/* pb-7 はシステム状態フッター(h-7)ぶんの余白 */}
+      <div className="relative z-10 grid h-full grid-cols-2 grid-rows-[minmax(0,1fr)] divide-x divide-slate-200 pb-7 dark:divide-cyan-400/10 *:min-h-0">
+        <MemberListPanel mode={authMode} setMode={setAuthMode} />
+        <FaceAuthPanel
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          mode={authMode}
+          setMode={setAuthMode}
+        />
       </div>
 
-      <SystemControlPanel />
-
       {visionError && (
-        <p className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 font-mono text-xs text-rose-600 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-400">
+        <p className="fixed bottom-9 left-1/2 z-40 -translate-x-1/2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 font-mono text-xs text-rose-600 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-400">
           [vision] {visionError}
         </p>
       )}

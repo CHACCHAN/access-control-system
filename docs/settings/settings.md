@@ -28,21 +28,25 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 |---|---|---|
 | theme | dark | ライト / ダークテーマ |
 | uiScale | 1.0 | UI 全体の拡大率(0.8〜1.5)。ルート font-size を倍率で変え、rem ベースのサイズ・余白・文字を一括で拡大縮小 |
+| hardwareVolume | 80 | スピーカーの**ハードウェア音量**(0〜100%)。ソフトウェア音量ではなく ALSA(amixer sset Master、無ければ PCM)を直接操作する。スライダー操作で即端末に反映され、保存せず閉じると元へ戻る。起動時にも保存値を再適用する |
 | rebootSchedule | (空) | 毎日この時刻(HH:MM)に端末を自動再起動 |
-| screenOffSchedule | (空) | この時刻に画面を暗転(操作で復帰) |
+| screenOffMinutes | 0 | **無操作がこの時間(分)続いたら**消灯(0 で無効)。時刻指定ではなく経過時間。フェード後に DPMS でディスプレイを物理消灯(発熱対策)。操作または人物接近(顔検出)で物理点灯して復帰 |
 
-`uiScale` は設定画面で編集中もライブプレビューされ、保存せず閉じると元に戻る。
-不正・範囲外の値は読み込み時に 0.8〜1.5 へクランプされる。
+`theme` / `uiScale` / `hardwareVolume` は**保存不要の即時反映**(操作した瞬間に
+設定へ書き込まれ、端末にも適用される)。その他の項目は「保存」で一括反映
+(実機では保存後に自動再起動)。uiScale の不正・範囲外の値は読み込み時に
+0.8〜1.5 へクランプされる。
 
 ### デザイン(APPEARANCE)→ 詳細は [ui/design-customization.md](../ui/design-customization.md)
 
 | キー | 既定値 | 内容 |
 |---|---|---|
 | appearance.accentColor | cyan | アクセントカラー(cyan/blue/emerald/violet/rose/amber) |
-| appearance.backgroundPattern | grid | 背景パターン(grid/dots/diagonal/none) |
+| appearance.backgroundPattern | grid | 背景パターン(grid/dots/diagonal/circuit/signal/none)。静的はトップ画面全体、アニメ付き(circuit/signal)は顔認証パネルの背景のみに描画 |
 | appearance.memberListLayout | grid | メンバー一覧レイアウト(grid/compact/list) |
 | appearance.memberPanelBg | (空) | トップ左パネルの背景色(空は既定) |
 | appearance.authPanelBg | (空) | トップ右パネルの背景色(空は既定) |
+| appearance.registerPanelBg | (空) | 顔登録画面の背景色(空は既定) |
 
 ### パフォーマンス(PERFORMANCE)
 
@@ -89,8 +93,22 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 
 空文字は「割り当てなし(そのジェスチャーでは更新しない)」。
 
+| キー | 既定値 | 内容 |
+|---|---|---|
+| rejectGesture | ThumbsDown | 確認カードで「ちがう」を意味するジェスチャー(サムズダウン👎)。空文字で無効 |
+
+### ジェスチャー割り当ての選択UI
+
+各ジェスチャーへのステータス割り当ては、ダークテーマで見づらい OS 標準の
+プルダウンではなくボタン選択式(在室 / 外出 / 帰宅 / なし)。
+
 ### ログ(LOGS)/ システム(SYSTEM)
 
 - ログ: アプリ内イベントログの閲覧。
-- システム: バージョン表示、アプリ終了(シェルに戻る)、クレジット
+- システム: バージョン表示、**電源操作(いずれも確認ダイアログ付き。
+  旧トップ画面左下の電源パネルを統合)**、クレジット
   (作成者: 中山裕哉 24G3102 / MIT License)。
+  電源操作は重さで色分けする: **再起動=黄(caution)/
+  シャットダウン=赤(danger zone)/ 終了(シェルに戻る)=グレー(exit)**。
+  ボタン・確認ダイアログの見出し・アイコンとも同じ配色で、終了には
+  ターミナルアイコンを使う。
