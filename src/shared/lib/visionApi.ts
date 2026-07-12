@@ -42,9 +42,23 @@ export interface EnrolledFaceInput {
   embedding: number[];
 }
 
+export interface FaceRecognitionOptions {
+  /** falseなら顔検出だけを行い、ArcFace embeddingと1:N照合を省略する。 */
+  matchFaces: boolean;
+  /** 検出専用時にも106点ランドマークを描画するか。 */
+  includeLandmarks: boolean;
+  /** この顔幅比率未満では、フロントが結果を使わないため照合を省略する。 */
+  minMatchFaceWidthRatio: number;
+}
+
 /** 推論基盤(ONNX Runtime + 5モデル)を初期化する。冪等。 */
 export function initVision(): Promise<void> {
   return invoke("init_vision");
+}
+
+/** 顔認証モデルだけを初期化する(ジェスチャーモデル障害から分離)。 */
+export function initFaceVision(): Promise<void> {
+  return invoke("init_face_vision");
 }
 
 /**
@@ -56,9 +70,9 @@ export function setEnrolledFaces(faces: EnrolledFaceInput[]): Promise<number> {
   return invoke("set_enrolled_faces", { faces });
 }
 
-/** 最新のカメラフレームに対する顔検出+1:N照合 */
-export function recognizeFace(): Promise<FaceAuthResult> {
-  return invoke("recognize_face");
+/** 最新のカメラフレームに対する顔検出。必要な画面だけ1:N照合まで行う。 */
+export function recognizeFace(options: FaceRecognitionOptions): Promise<FaceAuthResult> {
+  return invoke("recognize_face", { ...options });
 }
 
 /** 顔登録用: 最新フレームから embedding を1件抽出(顔なし等はエラー) */

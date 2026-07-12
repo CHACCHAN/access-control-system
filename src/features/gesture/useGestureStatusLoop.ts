@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AttendanceStatus } from "@/entities/member/api";
-import { ATTENDANCE_STATUSES } from "@/entities/member/statusStyle";
+import { isAttendanceStatus, type AttendanceStatus } from "@/entities/member/model";
 import { useSettings } from "@/shared/hooks/useSettings";
 import { detectGesture, type GestureKind } from "@/shared/lib/visionApi";
 
@@ -39,6 +38,7 @@ export function useGestureStatusLoop({
   onStatusRef.current = onStatus;
   const onRejectRef = useRef(onReject);
   onRejectRef.current = onReject;
+  const armedRef = useRef(true);
 
   useEffect(() => {
     if (!active) {
@@ -61,7 +61,17 @@ export function useGestureStatusLoop({
         errorLogged = false;
         setDetectedGesture(result.handDetected ? result.gesture : null);
 
-        if (result.gesture !== "Unknown" && result.gesture === lastGesture) {
+        // 1回発火した手を出し続けてもPOSTを繰り返さない。一度手なし/Unknownを
+        // 観測してから次の操作を受け付ける。
+        if (!result.handDetected || result.gesture === "Unknown") {
+          armedRef.current = true;
+          lastGesture = null;
+          streak = 0;
+          return;
+        }
+        if (!armedRef.current) return;
+
+        if (result.gesture === lastGesture) {
           streak += 1;
         } else {
           streak = 1;
@@ -75,6 +85,7 @@ export function useGestureStatusLoop({
           result.gesture === rejectGesture
         ) {
           streak = 0;
+          armedRef.current = false;
           onRejectRef.current?.();
           return;
         }
@@ -82,10 +93,11 @@ export function useGestureStatusLoop({
         if (
           streak >= gestureStableCount &&
           result.roomStatus &&
-          (ATTENDANCE_STATUSES as string[]).includes(result.roomStatus)
+          isAttendanceStatus(result.roomStatus)
         ) {
           streak = 0;
-          onStatusRef.current(result.roomStatus as AttendanceStatus);
+          armedRef.current = false;
+          onStatusRef.current(result.roomStatus);
         }
       } catch (err) {
         // カメラフレーム未取得・ブラウザ単体実行など。ログを埋めないよう1回だけ記録

@@ -334,12 +334,15 @@
   }
 }
 
-/* モーション軽減設定を尊重して、動く背景は止める */
+/* モーション軽減設定を尊重して、背景・走査線・パルス・画面遷移を止める */
 @media (prefers-reduced-motion: reduce) {
-  .cyber-circuit::before,
-  .cyber-circuit::after,
-  .cyber-signal::before {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

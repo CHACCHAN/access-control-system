@@ -63,7 +63,15 @@ bun install
 bun run dev
 ```
 
-起動すると Vite のリンクがターミナルに表示されるので(`Local: http://localhost:xxxx/` の形式)、**ターミナルに表示されたリンク**をブラウザで開いて確認します(ポートフォワードは自動設定済み)。カメラ機能を使う場合、`localhost` は HTTPS 制約の対象外なのでそのまま動作します。
+起動すると Vite のリンクがターミナルに表示されるので(`Local: http://localhost:xxxx/` の形式)、**ターミナルに表示されたリンク**をブラウザで開いて確認します(ポートフォワードは自動設定済み)。
+
+このブラウザ起動は UI と API 連携の確認向けです。カメラ取得・顔認証・ジェスチャー認識・電源操作は Tauri/Rust のネイティブ機能を使うため、次のコマンドで確認します。
+
+```bash
+bun run tauri dev
+```
+
+ブラウザでは Tauri 固有の起動診断をスキップし、利用可能なブラウザ機能のみ確認します。
 
 なお `bun run dev` は Vite と同時に、外部 API への CORS 回避用の中継サーバー(既定: localhost:8787)も起動します。詳細は [docs/api/http-routing.md](docs/api/http-routing.md) を参照してください。
 

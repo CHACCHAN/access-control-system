@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Member } from "@/entities/member/api";
+import type { Member } from "@/entities/member/model";
 import { recognizeFace } from "@/shared/lib/visionApi";
 import { useSettings } from "@/shared/hooks/useSettings";
 import type { EnrolledFace } from "./FaceAuthContext";
@@ -62,14 +62,26 @@ export function useFaceRecognitionLoop({
   // 連続一致カウント(同じ userId が続いた回数)
   const matchStreakRef = useRef<{ userId: string; count: number } | null>(null);
   const errorLoggedRef = useRef(false);
+  // 手動否認・記録後、同じ顔が写ったまま即再表示されないよう、一度顔が
+  // フレームから外れるまで次の確定を抑止する。
+  const awaitingFaceExitRef = useRef(false);
+
+  useEffect(() => {
+    if (enableMatch) return;
+    missCountRef.current = 0;
+    matchStreakRef.current = null;
+    setMatchedMember(null);
+  }, [enableMatch]);
 
   useEffect(() => {
     if (!active) {
+      setIsInferring(false);
       missCountRef.current = 0;
       matchStreakRef.current = null;
       return;
     }
 
+    let cancelled = false;
     const timer = window.setInterval(async () => {
       if (isCheckingRef.current) return;
 
@@ -77,12 +89,24 @@ export function useFaceRecognitionLoop({
       setIsInferring(true);
       try {
         const startedAt = performance.now();
-        const result = await recognizeFace();
+        const result = await recognizeFace({
+          // 登録画面は可視化だけ、確認カード中は離脱検出だけでよいため、
+          // 高コストなembedding抽出・1:N照合を繰り返さない。
+          matchFaces: enableMatch && matchedMember === null,
+          includeLandmarks: matchedMember === null,
+          // この比率未満の認識結果は下で「近づいて」と破棄するため、Rust側でも
+          // ランドマーク・embedding処理へ進ませない。
+          minMatchFaceWidthRatio: CLOSE_THRESHOLD,
+        });
+        // active/mode/メンバー一覧が変わった後に届いた旧推論結果をUIへ反映しない。
+        if (cancelled) return;
         const elapsedMs = performance.now() - startedAt;
         // 検出間隔より処理時間が長いと取りこぼしが増えるため、比較できるようログに残す
-        console.log(
-          `[face-recognition] rust inference took ${elapsedMs.toFixed(0)}ms (interval: ${detectionIntervalMs}ms)`,
-        );
+        if (import.meta.env.DEV) {
+          console.log(
+            `[face-recognition] rust inference took ${elapsedMs.toFixed(0)}ms (interval: ${detectionIntervalMs}ms)`,
+          );
+        }
         errorLoggedRef.current = false;
 
         // 登録中(enableMatch=false)は検出の可視化だけ走らせ、確定はしない
@@ -107,6 +131,13 @@ export function useFaceRecognitionLoop({
         }
 
         if (!result.faceDetected || !result.bbox) {
+          awaitingFaceExitRef.current = false;
+          matchStreakRef.current = null;
+          setHint("scanning");
+          return;
+        }
+
+        if (awaitingFaceExitRef.current) {
           matchStreakRef.current = null;
           setHint("scanning");
           return;
@@ -156,16 +187,21 @@ export function useFaceRecognitionLoop({
         setHint("scanning");
       } finally {
         isCheckingRef.current = false;
-        setIsInferring(false);
+        if (!cancelled) setIsInferring(false);
       }
     }, detectionIntervalMs);
 
-    return () => window.clearInterval(timer);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [active, enableMatch, matchedMember, enrolledFaces, members, detectionIntervalMs, stableCount]);
 
   function dismissMatch() {
     missCountRef.current = 0;
+    awaitingFaceExitRef.current = true;
     setMatchedMember(null);
+    setHint("scanning");
   }
 
   return { hint, isInferring, matchedMember, dismissMatch };

@@ -94,6 +94,7 @@ export function AppearanceSection({ draft, setDraft }: SectionProps) {
                 <button
                   key={value}
                   type="button"
+                  aria-pressed={active}
                   onClick={() => setAppearance("accentColor", value)}
                   className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition ${
                     active
@@ -126,6 +127,7 @@ export function AppearanceSection({ draft, setDraft }: SectionProps) {
                 <button
                   key={value}
                   type="button"
+                  aria-pressed={active}
                   onClick={() => setAppearance("backgroundPattern", value)}
                   className={`overflow-hidden rounded-lg border text-xs font-medium transition ${
                     active
@@ -154,6 +156,7 @@ export function AppearanceSection({ draft, setDraft }: SectionProps) {
                 <button
                   key={value}
                   type="button"
+                  aria-pressed={active}
                   onClick={() => setAppearance("memberListLayout", value)}
                   className={`rounded-lg border px-3 py-2.5 text-left transition ${
                     active

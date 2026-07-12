@@ -218,6 +218,167 @@ export const DEFAULT_SETTINGS: AppSettings = {
   appearance: DEFAULT_APPEARANCE,
 };
 
+function finiteInRange(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+  integer = false,
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  const clamped = Math.min(max, Math.max(min, value));
+  return integer ? Math.round(clamped) : clamped;
+}
+
+/** 保存ファイルやフォーム値を、全利用側が安全に扱えるAppSettingsへ正規化する。 */
+export function normalizeSettings(value: unknown): AppSettings {
+  const stored =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Partial<AppSettings>)
+      : {};
+  const perf: Partial<PerformanceSettings> =
+    stored.performance && typeof stored.performance === "object" ? stored.performance : {};
+  const appearance: Partial<AppearanceSettings> =
+    stored.appearance && typeof stored.appearance === "object" ? stored.appearance : {};
+  const gesture: Partial<GestureStatusMap> =
+    stored.gestureStatusMap && typeof stored.gestureStatusMap === "object"
+      ? stored.gestureStatusMap
+      : {};
+  const stringValue = (candidate: unknown, fallback: string) =>
+    typeof candidate === "string" ? candidate : fallback;
+  const statusValue = (candidate: unknown, fallback: string) =>
+    candidate === "" || candidate === "在室" || candidate === "外出" || candidate === "帰宅"
+      ? candidate
+      : fallback;
+  const accentValues: readonly string[] = ["cyan", "emerald", "violet", "rose", "amber", "blue"];
+  const patternValues: readonly string[] = ["grid", "dots", "diagonal", "circuit", "signal", "none"];
+  const layoutValues: readonly string[] = ["grid", "compact", "list"];
+  const panelColor = (candidate: unknown, fallback: string) =>
+    typeof candidate === "string" && (candidate === "" || /^#[0-9a-fA-F]{6}$/.test(candidate))
+      ? candidate
+      : fallback;
+
+  return {
+    ...DEFAULT_SETTINGS,
+    theme: stored.theme === "light" || stored.theme === "dark" ? stored.theme : DEFAULT_SETTINGS.theme,
+    uiScale: clampUiScale(
+      typeof stored.uiScale === "number" ? stored.uiScale : UI_SCALE_DEFAULT,
+    ),
+    hardwareVolume: clampHardwareVolume(
+      typeof stored.hardwareVolume === "number"
+        ? stored.hardwareVolume
+        : HARDWARE_VOLUME_DEFAULT,
+    ),
+    rebootSchedule:
+      typeof stored.rebootSchedule === "string" &&
+      (stored.rebootSchedule === "" || /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(stored.rebootSchedule))
+        ? stored.rebootSchedule
+        : "",
+    screenOffMinutes: finiteInRange(stored.screenOffMinutes, 0, 0, 720, true),
+    getEndpoint: stringValue(stored.getEndpoint, DEFAULT_SETTINGS.getEndpoint),
+    postEndpoint: stringValue(stored.postEndpoint, DEFAULT_SETTINGS.postEndpoint),
+    attendanceEndpoint: stringValue(
+      stored.attendanceEndpoint,
+      DEFAULT_SETTINGS.attendanceEndpoint,
+    ),
+    wsEndpoint: stringValue(stored.wsEndpoint, DEFAULT_SETTINGS.wsEndpoint),
+    apiToken: stringValue(stored.apiToken, DEFAULT_SETTINGS.apiToken),
+    descriptorBodyTemplate: stringValue(
+      stored.descriptorBodyTemplate,
+      DEFAULT_DESCRIPTOR_BODY_TEMPLATE,
+    ),
+    attendanceBodyTemplate: stringValue(
+      stored.attendanceBodyTemplate,
+      DEFAULT_ATTENDANCE_BODY_TEMPLATE,
+    ),
+    wsSignalField: stringValue(stored.wsSignalField, DEFAULT_SETTINGS.wsSignalField),
+    wsSignalValue: stringValue(stored.wsSignalValue, DEFAULT_SETTINGS.wsSignalValue),
+    gestureStatusMap: {
+      rock: statusValue(gesture.rock, DEFAULT_GESTURE_STATUS_MAP.rock),
+      scissors: statusValue(gesture.scissors, DEFAULT_GESTURE_STATUS_MAP.scissors),
+      paper: statusValue(gesture.paper, DEFAULT_GESTURE_STATUS_MAP.paper),
+    },
+    rejectGesture:
+      stored.rejectGesture === "" || stored.rejectGesture === "ThumbsDown"
+        ? stored.rejectGesture
+        : DEFAULT_REJECT_GESTURE,
+    performance: {
+      recognitionIntervalMs: finiteInRange(
+        perf.recognitionIntervalMs,
+        DEFAULT_PERFORMANCE.recognitionIntervalMs,
+        200,
+        5000,
+        true,
+      ),
+      recognitionStableCount: finiteInRange(
+        perf.recognitionStableCount,
+        DEFAULT_PERFORMANCE.recognitionStableCount,
+        1,
+        5,
+        true,
+      ),
+      gesturePollIntervalMs: finiteInRange(
+        perf.gesturePollIntervalMs,
+        DEFAULT_PERFORMANCE.gesturePollIntervalMs,
+        200,
+        5000,
+        true,
+      ),
+      gestureStableCount: finiteInRange(
+        perf.gestureStableCount,
+        DEFAULT_PERFORMANCE.gestureStableCount,
+        1,
+        5,
+        true,
+      ),
+      cameraFrameIntervalMs: finiteInRange(
+        perf.cameraFrameIntervalMs,
+        DEFAULT_PERFORMANCE.cameraFrameIntervalMs,
+        33,
+        2000,
+        true,
+      ),
+      cameraJpegQuality: finiteInRange(
+        perf.cameraJpegQuality,
+        DEFAULT_PERFORMANCE.cameraJpegQuality,
+        10,
+        100,
+        true,
+      ),
+      matchThreshold: finiteInRange(
+        perf.matchThreshold,
+        DEFAULT_PERFORMANCE.matchThreshold,
+        0.1,
+        0.95,
+      ),
+      matchMargin: finiteInRange(perf.matchMargin, DEFAULT_PERFORMANCE.matchMargin, 0, 0.5),
+      minFaceWidthRatio: finiteInRange(
+        perf.minFaceWidthRatio,
+        DEFAULT_PERFORMANCE.minFaceWidthRatio,
+        0,
+        0.9,
+      ),
+    },
+    appearance: {
+      accentColor: accentValues.includes(String(appearance.accentColor))
+        ? (appearance.accentColor as AccentColor)
+        : DEFAULT_APPEARANCE.accentColor,
+      backgroundPattern: patternValues.includes(String(appearance.backgroundPattern))
+        ? (appearance.backgroundPattern as BackgroundPattern)
+        : DEFAULT_APPEARANCE.backgroundPattern,
+      memberListLayout: layoutValues.includes(String(appearance.memberListLayout))
+        ? (appearance.memberListLayout as MemberListLayout)
+        : DEFAULT_APPEARANCE.memberListLayout,
+      memberPanelBg: panelColor(appearance.memberPanelBg, DEFAULT_APPEARANCE.memberPanelBg),
+      authPanelBg: panelColor(appearance.authPanelBg, DEFAULT_APPEARANCE.authPanelBg),
+      registerPanelBg: panelColor(
+        appearance.registerPanelBg,
+        DEFAULT_APPEARANCE.registerPanelBg,
+      ),
+    },
+  };
+}
+
 const STORE_FILE = "settings.json";
 const SETTINGS_KEY = "settings";
 
@@ -226,11 +387,107 @@ let storePromise: Promise<Store> | null = null;
 function getStore(): Promise<Store> {
   if (!storePromise) {
     storePromise = load(STORE_FILE, {
-      autoSave: true,
+      // 保存タイミングは下の直列キューで一元管理する。プラグイン側の自動保存と
+      // 明示的な save() が競合・重複しないよう、autoSave は無効にする。
+      autoSave: false,
       defaults: { [SETTINGS_KEY]: DEFAULT_SETTINGS },
+    }).catch((error) => {
+      // 一時的な読み込み失敗を永続的にキャッシュしない。次回更新時に再試行できるようにする。
+      storePromise = null;
+      throw error;
     });
   }
   return storePromise;
+}
+
+// UIスケール・音量のスライダーは短時間に多数の更新を発生させる。
+// 更新ごとの store.set/save は避けつつ、「呼び出し元の Promise が完了した時点では
+// その更新を含む最新スナップショットがディスクへ保存済み」という保証は維持する。
+const SAVE_DEBOUNCE_MS = 100;
+
+interface SaveWaiter {
+  resolve: () => void;
+  reject: (reason: unknown) => void;
+}
+
+interface PendingSave {
+  settings: AppSettings;
+  waiters: SaveWaiter[];
+}
+
+let pendingSave: PendingSave | null = null;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+// 常に resolve する tail を使い、1回の保存失敗後も後続保存を直列に継続できるようにする。
+let saveQueueTail: Promise<void> = Promise.resolve();
+
+function cloneSettings(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    gestureStatusMap: { ...settings.gestureStatusMap },
+    performance: { ...settings.performance },
+    appearance: { ...settings.appearance },
+  };
+}
+
+async function persistSettings(settings: AppSettings): Promise<void> {
+  const store = await getStore();
+  await store.set(SETTINGS_KEY, settings);
+  // set() の resolve だけではディスク書き込み完了を保証しないため、再起動前にも
+  // 確実に反映されるよう明示的な save() の完了まで待つ。
+  await store.save();
+}
+
+/** 保留中の最新版を直列保存キューへ移し、その保存処理を返す。 */
+function flushPendingSave(): Promise<void> {
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+
+  const batch = pendingSave;
+  if (!batch) return saveQueueTail;
+  pendingSave = null;
+
+  const operation = saveQueueTail.then(() => persistSettings(batch.settings));
+  // tail 自体は失敗を吸収する。個々の呼び出し元には下の waiters 経由で失敗を返す。
+  saveQueueTail = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+  operation.then(
+    () => batch.waiters.forEach(({ resolve }) => resolve()),
+    (error) => batch.waiters.forEach(({ reject }) => reject(error)),
+  );
+  return operation;
+}
+
+function scheduleSettingsSave(settings: AppSettings): Promise<void> {
+  if (!isTauri()) return Promise.resolve();
+
+  let waiter!: SaveWaiter;
+  const completion = new Promise<void>((resolve, reject) => {
+    waiter = { resolve, reject };
+  });
+
+  if (pendingSave) {
+    // 同じデバウンス窓の更新は、全変更を含む最新スナップショット1件へまとめる。
+    pendingSave.settings = cloneSettings(settings);
+    pendingSave.waiters.push(waiter);
+  } else {
+    pendingSave = { settings: cloneSettings(settings), waiters: [waiter] };
+  }
+
+  if (saveTimer !== null) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    // 各 waiter が本来の失敗を受け取るため、タイマー側では未処理拒否だけを防ぐ。
+    void flushPendingSave().catch(() => {});
+  }, SAVE_DEBOUNCE_MS);
+
+  // 即時反映系の既存呼び出し元には Promise を意図的に待たない箇所もある。
+  // その場合も unhandledrejection にせず、await する呼び出し元には元の拒否を返す。
+  void completion.catch(() => {});
+  return completion;
 }
 
 /**
@@ -242,48 +499,17 @@ export async function loadSettings(): Promise<AppSettings> {
   if (!isTauri()) return DEFAULT_SETTINGS;
 
   try {
+    // Provider の再マウントなどで直前の保存が残っている場合、古い値を読まないよう
+    // 保留分をキューへ移して、先行する保存処理が落ち着いてから読み込む。
+    void flushPendingSave().catch(() => {});
+    await saveQueueTail;
     const store = await getStore();
     const stored = await store.get<AppSettings>(SETTINGS_KEY);
     if (!stored) return DEFAULT_SETTINGS;
-    return {
-      ...DEFAULT_SETTINGS,
-      ...stored,
-      // 不正・範囲外の拡大率で画面が壊れないよう読み込み時にクランプする
-      uiScale: clampUiScale(stored.uiScale ?? UI_SCALE_DEFAULT),
-      hardwareVolume: clampHardwareVolume(stored.hardwareVolume ?? HARDWARE_VOLUME_DEFAULT),
-      // 旧バージョンの時刻指定(screenOffSchedule)からの移行時は未設定(0=無効)になる
-      screenOffMinutes: Number.isFinite(stored.screenOffMinutes)
-        ? Math.max(0, Math.round(stored.screenOffMinutes))
-        : 0,
-      // ネストしたオブジェクトは浅いマージだと保存済みの値で丸ごと
-      // 置き換わり、後から追加したキーの既定値が失われるため個別にマージする
-      gestureStatusMap: {
-        ...DEFAULT_GESTURE_STATUS_MAP,
-        ...stored.gestureStatusMap,
-      },
-      performance: {
-        ...DEFAULT_PERFORMANCE,
-        ...stored.performance,
-      },
-      appearance: {
-        ...DEFAULT_APPEARANCE,
-        ...stored.appearance,
-      },
-    };
+    return normalizeSettings(stored);
   } catch {
     return DEFAULT_SETTINGS;
   }
-}
-
-async function saveSettings(settings: AppSettings): Promise<void> {
-  if (!isTauri()) return;
-  const store = await getStore();
-  await store.set(SETTINGS_KEY, settings);
-  // autoSave はデフォルト100msデバウンスでのディスク書き込みのため、set() の
-  // resolve だけでは実際の書き込み完了を保証しない。保存直後に再起動を伴う
-  // 呼び出し元(設定画面)があるため、ここで明示的に save() を待って
-  // ディスクへの書き込みを確実に完了させてから戻る。
-  await store.save();
 }
 
 interface SettingsContextValue {
@@ -303,26 +529,30 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
   const settingsRef = useRef(settings);
-  settingsRef.current = settings;
 
   useEffect(() => {
     let cancelled = false;
 
     loadSettings().then((loaded) => {
       if (cancelled) return;
+      settingsRef.current = loaded;
       setSettings(loaded);
       setIsLoading(false);
     });
 
     return () => {
       cancelled = true;
+      // Provider が外れても、既に返した更新Promiseと保存内容を失わない。
+      void flushPendingSave().catch(() => {});
     };
   }, []);
 
   const updateSettings = useCallback((partial: Partial<AppSettings>) => {
-    const next = { ...settingsRef.current, ...partial };
+    const next = normalizeSettings({ ...settingsRef.current, ...partial });
+    // React の次レンダーを待たず同期更新する。同一tickの連続呼び出しも直前の変更を引き継ぐ。
+    settingsRef.current = next;
     setSettings(next);
-    return saveSettings(next);
+    return scheduleSettingsSave(next);
   }, []);
 
   return createElement(SettingsContext.Provider, {

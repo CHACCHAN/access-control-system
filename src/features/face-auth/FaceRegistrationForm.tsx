@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMembers } from "@/entities/member/MemberContext";
 import { registerDescriptor } from "@/entities/member/api";
 import { useSettings } from "@/shared/hooks/useSettings";
@@ -31,6 +31,7 @@ export function FaceRegistrationForm({ onClose }: FaceRegistrationFormProps) {
   const [captureState, setCaptureState] = useState<CaptureState>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const onCloseRef = useRef(onClose);
+  const successTimerRef = useRef<number | null>(null);
   onCloseRef.current = onClose;
 
   useEffect(() => {
@@ -40,11 +41,21 @@ export function FaceRegistrationForm({ onClose }: FaceRegistrationFormProps) {
     return () => window.clearTimeout(timer);
   }, [search, selectedUsername, captureState]);
 
-  const filteredMembers = members.filter((m) => {
+  useEffect(
+    () => () => {
+      if (successTimerRef.current !== null) window.clearTimeout(successTimerRef.current);
+    },
+    [],
+  );
+
+  const filteredMembers = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return true;
-    return m.name.toLowerCase().includes(query) || m.username.toLowerCase().includes(query);
-  });
+    if (!query) return members;
+    return members.filter(
+      (member) =>
+        member.name.toLowerCase().includes(query) || member.username.toLowerCase().includes(query),
+    );
+  }, [members, search]);
 
   async function handleCapture() {
     if (!selectedUsername) {
@@ -72,7 +83,10 @@ export function FaceRegistrationForm({ onClose }: FaceRegistrationFormProps) {
       playUiSound("success");
       setCaptureState("success");
       setMessage("顔情報を登録しました");
-      setTimeout(onClose, 1200);
+      successTimerRef.current = window.setTimeout(() => {
+        onCloseRef.current();
+        successTimerRef.current = null;
+      }, 1200);
     } catch (err) {
       playUiSound("error");
       setCaptureState("error");
@@ -103,6 +117,7 @@ export function FaceRegistrationForm({ onClose }: FaceRegistrationFormProps) {
         </div>
         <button
           onClick={onClose}
+          disabled={captureState === "capturing" || captureState === "success"}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-cyan-400/50 hover:text-cyan-600 dark:border-white/10 dark:bg-slate-800/60 dark:text-slate-200 dark:shadow-none dark:hover:border-cyan-400/50 dark:hover:text-cyan-300"
           aria-label="登録をやめる"
         >
@@ -112,6 +127,7 @@ export function FaceRegistrationForm({ onClose }: FaceRegistrationFormProps) {
 
       <input
         type="text"
+        aria-label="登録するメンバーを検索"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="名前・ユーザー名で検索"
@@ -165,6 +181,7 @@ export function FaceRegistrationForm({ onClose }: FaceRegistrationFormProps) {
 
       {message && (
         <p
+          role={captureState === "error" ? "alert" : "status"}
           className={`text-xs ${
             captureState === "error"
               ? "text-rose-600 dark:text-rose-400"

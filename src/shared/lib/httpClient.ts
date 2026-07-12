@@ -16,9 +16,23 @@ import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 // - 万一 DEV でない状態でブラウザ実行された場合(例: vite preview)は中継が無いので
 //   標準 fetch にフォールバックする。
 
-// scripts/dev.ts の PROXY_PORT と一致させること
-const DEV_PROXY_PORT = 8787;
+// scripts/dev.ts が DEV_PROXY_PORT を Vite 公開用の環境変数へ引き継ぐ。
+const configuredProxyPort = Number(import.meta.env.VITE_DEV_PROXY_PORT ?? 8787);
+const DEV_PROXY_PORT =
+  Number.isInteger(configuredProxyPort) && configuredProxyPort > 0 && configuredProxyPort <= 65_535
+    ? configuredProxyPort
+    : 8787;
 const DEV_PROXY_BASE = `http://localhost:${DEV_PROXY_PORT}/proxy`;
+
+/** 外部APIが応答しない場合にキオスク操作を永久待機させないための上限。 */
+export const HTTP_TIMEOUT_MS = 10_000;
+
+export class HttpTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`APIリクエストがタイムアウトしました(${Math.round(timeoutMs / 1000)}秒)`);
+    this.name = "HttpTimeoutError";
+  }
+}
 
 function toUrlString(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
@@ -33,8 +47,54 @@ function devProxyFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Re
   return globalThis.fetch(proxied, init);
 }
 
-export const httpFetch: typeof globalThis.fetch = isTauri()
+const runtimeFetch: typeof globalThis.fetch = isTauri()
   ? (tauriFetch as unknown as typeof globalThis.fetch)
   : import.meta.env.DEV
     ? (devProxyFetch as typeof globalThis.fetch)
     : globalThis.fetch.bind(globalThis);
+
+/**
+ * 実行環境ごとの通信経路とタイムアウトを一箇所へ集約したfetch。
+ * 呼び出し元のAbortSignalも維持し、画面遷移や新しい再取得で古い通信を中断できる。
+ */
+export async function httpFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = HTTP_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const callerSignal = init.signal;
+  let timedOut = false;
+
+  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) {
+    abortFromCaller();
+  } else {
+    callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  }
+
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const response = await runtimeFetch(input, { ...init, signal: controller.signal });
+    // plugin-http/ブラウザfetchはいずれもヘッダー受信時点でresolveし得るため、
+    // bodyもここで読み切る。これによりjson()/text()が別途永久待機せず、操作全体へ
+    // 同じタイムアウトとAbortSignalを適用できる。このアプリのAPIは小さなJSONのみ。
+    const body = await response.arrayBuffer();
+    const bodyInit = [101, 204, 205, 304].includes(response.status) ? null : body;
+    return new Response(bodyInit, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  } catch (err) {
+    if (timedOut) throw new HttpTimeoutError(timeoutMs);
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+    callerSignal?.removeEventListener("abort", abortFromCaller);
+  }
+}

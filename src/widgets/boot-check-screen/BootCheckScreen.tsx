@@ -45,7 +45,7 @@ export function BootCheckScreen({ onContinue }: BootCheckScreenProps) {
   const progress = Math.round((done / total) * 100);
 
   return (
-    <div className="fixed inset-0 z-100 flex flex-col items-center justify-center overflow-hidden bg-[#070b14] px-6 text-slate-300">
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-[#070b14] px-6 pb-7 text-slate-300">
       {/* 背景装飾: 格子 + 上部グロー + 走査線 */}
       <div className="cyber-grid pointer-events-none absolute inset-0 opacity-70" />
       <div

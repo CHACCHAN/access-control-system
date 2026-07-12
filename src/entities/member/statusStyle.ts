@@ -1,7 +1,7 @@
-import type { AttendanceStatus } from "./api";
+import { ATTENDANCE_STATUSES, type AttendanceStatus } from "./model";
 import { DoorIcon, HomeIcon, WalkIcon } from "@/shared/ui/icons";
 
-export const ATTENDANCE_STATUSES: AttendanceStatus[] = ["在室", "外出", "帰宅"];
+export { ATTENDANCE_STATUSES };
 
 export const STATUS_STYLE: Record<
   AttendanceStatus,

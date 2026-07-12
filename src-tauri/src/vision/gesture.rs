@@ -13,7 +13,7 @@ use std::time::Instant;
 use super::geometry::{
     apply_affine, dist, invert_affine, letterbox, nms, rotation_matrix, warp_affine, DetBox, RgbBuf,
 };
-use super::runtime::{elapsed_ms, load_session, run_single_input, Session};
+use super::runtime::{elapsed_ms, load_session, run_single_input, ModelSession};
 
 const PALM_INPUT_SIZE: usize = 192;
 const PALM_SCORE_THRESHOLD: f32 = 0.6;
@@ -59,8 +59,8 @@ pub struct HandResult {
 }
 
 pub struct GestureEngine {
-    palm: Session,
-    handpose: Session,
+    palm: ModelSession,
+    handpose: ModelSession,
     /// SSDアンカー中心([0,1] 正規化座標)。2016個。
     anchors: Vec<[f32; 2]>,
 }
@@ -172,11 +172,13 @@ impl GestureEngine {
         }
 
         let kept = nms(candidates, PALM_NMS_THRESHOLD);
-        eprintln!(
-            "[vision] 手のひら検出: {}ms ({}件)",
-            elapsed_ms(started),
-            kept.len()
-        );
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "[vision] 手のひら検出: {}ms ({}件)",
+                elapsed_ms(started),
+                kept.len()
+            );
+        }
         Ok(kept)
     }
 
@@ -184,12 +186,32 @@ impl GestureEngine {
     /// 21点ランドマークを推定し、ジェスチャーに分類する。
     /// 分類は回転補正後のクロップ座標系で完結するため、元座標への
     /// 逆変換は行わない(距離比ベースの判定は座標系に依存しない)。
-    fn estimate_hand(&mut self, frame: &RgbBuf, palm: &DetBox) -> Result<Option<HandResult>, String> {
+    fn estimate_hand(
+        &mut self,
+        frame: &RgbBuf,
+        palm: &DetBox,
+    ) -> Result<Option<HandResult>, String> {
         let started = Instant::now();
+
+        // モデル出力が壊れている場合は座標演算へ進まない。特に NaN を
+        // warp_affine まで渡すと、無効な手を認識結果として扱う可能性がある。
+        if palm.kps.len() < 3
+            || palm
+                .kps
+                .iter()
+                .flatten()
+                .any(|coordinate| !coordinate.is_finite())
+        {
+            return Ok(None);
+        }
 
         // --- 1. 手のひら周辺を大きめ(×4)に切り出し、回転しても欠けないよう
         //        対角線長の正方形にパディング(_cropAndPadFromPalm for_rotation=True)
-        let (crop1, bbox1, bias1) = crop_and_pad(frame, &bbox_of(palm), 0.0, PALM_BOX_PRE_ENLARGE, true);
+        let Some((crop1, bbox1, bias1)) =
+            crop_and_pad(frame, &bbox_of(palm), 0.0, PALM_BOX_PRE_ENLARGE, true)
+        else {
+            return Ok(None);
+        };
 
         // 切り出し後座標系での手のひらランドマーク
         let palm_kps: Vec<[f32; 2]> = palm
@@ -201,9 +223,9 @@ impl GestureEngine {
         // --- 2. 手首(kps[0])→中指付け根(kps[2])が真上を向くよう回転補正
         let p1 = palm_kps[0];
         let p2 = palm_kps[2];
-        let mut radians =
-            std::f32::consts::FRAC_PI_2 - (-(p2[1] - p1[1])).atan2(p2[0] - p1[0]);
-        radians -= 2.0 * std::f32::consts::PI
+        let mut radians = std::f32::consts::FRAC_PI_2 - (-(p2[1] - p1[1])).atan2(p2[0] - p1[0]);
+        radians -= 2.0
+            * std::f32::consts::PI
             * ((radians + std::f32::consts::PI) / (2.0 * std::f32::consts::PI)).floor();
         let angle_deg = radians.to_degrees();
 
@@ -234,13 +256,15 @@ impl GestureEngine {
         }
 
         // --- 3. 上方向へシフト(-0.4)しつつ×3に広げて再切り出し
-        let (crop2, _bbox2, bias2) = crop_and_pad(
+        let Some((crop2, _bbox2, bias2)) = crop_and_pad(
             &rotated,
             &[min_x, min_y, max_x, max_y],
             PALM_BOX_SHIFT_Y,
             PALM_BOX_ENLARGE,
             false,
-        );
+        ) else {
+            return Ok(None);
+        };
 
         // 224x224 へ縮小し /255 + NHWC
         let scale = HAND_INPUT_SIZE as f32 / crop2.width.max(crop2.height).max(1) as f32;
@@ -275,11 +299,13 @@ impl GestureEngine {
             _ => return Err("handpose の出力形状が想定外です".to_string()),
         };
 
-        eprintln!(
-            "[vision] 21点ランドマーク: {}ms (conf={:.2})",
-            elapsed_ms(started),
-            conf
-        );
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "[vision] 21点ランドマーク: {}ms (conf={:.2})",
+                elapsed_ms(started),
+                conf
+            );
+        }
         if conf < HAND_CONF_THRESHOLD {
             return Ok(None);
         }
@@ -332,16 +358,33 @@ fn bbox_of(det: &DetBox) -> [f32; 4] {
 /// bbox を y方向に shift_y×高さ だけずらし、enlarge 倍に広げて切り出し、
 /// 正方形(pad_to_diagonal なら対角線長、そうでなければ長辺)に
 /// 中央パディングする。戻り値は (画像, 広げた後のbbox(クリップ済み・元座標),
-/// 切り出し画像座標→元座標のオフセット)。
+/// 切り出し画像座標→元座標のオフセット)。bbox が無効、または
+/// 画像と実際に交差しない場合は None を返す。
 fn crop_and_pad(
     src: &RgbBuf,
     bbox: &[f32; 4],
     shift_y: f32,
     enlarge: f32,
     pad_to_diagonal: bool,
-) -> (RgbBuf, [f32; 4], [f32; 2]) {
+) -> Option<(RgbBuf, [f32; 4], [f32; 2])> {
+    let expected_len = src.width.checked_mul(src.height)?.checked_mul(3)?;
+    if src.width == 0
+        || src.height == 0
+        || src.data.len() != expected_len
+        || !shift_y.is_finite()
+        || !enlarge.is_finite()
+        || enlarge <= 0.0
+        || bbox.iter().any(|coordinate| !coordinate.is_finite())
+    {
+        return None;
+    }
+
     let w = bbox[2] - bbox[0];
     let h = bbox[3] - bbox[1];
+    if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+
     let shifted = [
         bbox[0],
         bbox[1] + shift_y * h,
@@ -352,38 +395,62 @@ fn crop_and_pad(
     let cy = (shifted[1] + shifted[3]) / 2.0;
     let half_w = w * enlarge / 2.0;
     let half_h = h * enlarge / 2.0;
+    let crop_bounds = [cx - half_w, cy - half_h, cx + half_w, cy + half_h];
+    if crop_bounds.iter().any(|coordinate| !coordinate.is_finite()) {
+        return None;
+    }
 
     // 整数化してから画像範囲にクリップ(リファレンス実装と同じ順序)
-    let x1 = ((cx - half_w) as i64).clamp(0, src.width as i64) as usize;
-    let y1 = ((cy - half_h) as i64).clamp(0, src.height as i64) as usize;
-    let x2 = ((cx + half_w) as i64).clamp(0, src.width as i64) as usize;
-    let y2 = ((cy + half_h) as i64).clamp(0, src.height as i64) as usize;
-    let crop_w = x2.saturating_sub(x1).max(1);
-    let crop_h = y2.saturating_sub(y1).max(1);
+    let max_x = i64::try_from(src.width).ok()?;
+    let max_y = i64::try_from(src.height).ok()?;
+    let x1 = (crop_bounds[0] as i64).clamp(0, max_x) as usize;
+    let y1 = (crop_bounds[1] as i64).clamp(0, max_y) as usize;
+    let x2 = (crop_bounds[2] as i64).clamp(0, max_x) as usize;
+    let y2 = (crop_bounds[3] as i64).clamp(0, max_y) as usize;
+    // max(1) で存在しない1pxを作ると、完全に画像外の bbox で以下の
+    // copy_from_slice が範囲外パニックする。実際の交差が無ければ推論対象外にする。
+    if x2 <= x1 || y2 <= y1 {
+        return None;
+    }
+    let crop_w = x2 - x1;
+    let crop_h = y2 - y1;
 
     let side = if pad_to_diagonal {
-        ((crop_w * crop_w + crop_h * crop_h) as f32).sqrt() as usize
+        let squared = crop_w
+            .checked_mul(crop_w)?
+            .checked_add(crop_h.checked_mul(crop_h)?)?;
+        (squared as f32).sqrt() as usize
     } else {
         crop_w.max(crop_h)
     }
-    .max(1);
+    .max(crop_w)
+    .max(crop_h);
     let pad_left = (side - crop_w) / 2;
     let pad_top = (side - crop_h) / 2;
 
-    let mut out = RgbBuf::new(side, side);
+    let output_len = side.checked_mul(side)?.checked_mul(3)?;
+    let mut out = RgbBuf {
+        width: side,
+        height: side,
+        data: vec![0; output_len].into(),
+    };
+    let row_len = crop_w.checked_mul(3)?;
     for y in 0..crop_h {
-        let src_row = ((y1 + y) * src.width + x1) * 3;
-        let dst_row = ((pad_top + y) * side + pad_left) * 3;
-        out.data[dst_row..dst_row + crop_w * 3]
-            .copy_from_slice(&src.data[src_row..src_row + crop_w * 3]);
+        let src_row = (y1 + y)
+            .checked_mul(src.width)?
+            .checked_add(x1)?
+            .checked_mul(3)?;
+        let dst_row = (pad_top + y)
+            .checked_mul(side)?
+            .checked_add(pad_left)?
+            .checked_mul(3)?;
+        let src_slice = src.data.get(src_row..src_row.checked_add(row_len)?)?;
+        let dst_slice = out.data.get_mut(dst_row..dst_row.checked_add(row_len)?)?;
+        dst_slice.copy_from_slice(src_slice);
     }
 
     let bias = [x1 as f32 - pad_left as f32, y1 as f32 - pad_top as f32];
-    (
-        out,
-        [x1 as f32, y1 as f32, x2 as f32, y2 as f32],
-        bias,
-    )
+    Some((out, [x1 as f32, y1 as f32, x2 as f32, y2 as f32], bias))
 }
 
 /// 21点ランドマークからジェスチャーを判定する。
@@ -411,8 +478,7 @@ fn classify_gesture(pts: &[[f32; 2]], pts_frame: &[[f32; 2]]) -> Gesture {
         .collect();
 
     let pinky_mcp = pts[17];
-    let thumb_extended =
-        dist(pts[4], pinky_mcp) > dist(pts[2], pinky_mcp) * FINGER_EXTENDED_RATIO;
+    let thumb_extended = dist(pts[4], pinky_mcp) > dist(pts[2], pinky_mcp) * FINGER_EXTENDED_RATIO;
 
     let extended_count = extended.iter().filter(|&&e| e).count();
     if extended_count == 0 && !thumb_extended {
@@ -446,7 +512,7 @@ mod tests {
     fn base_hand() -> Vec<[f32; 2]> {
         let mut pts = vec![[0.0f32, 0.0]; 21];
         pts[0] = [0.0, 0.0]; // wrist
-        // 親指: MCP(2)=(-30,-30), IP(3), TIP(4) は伸展時さらに外側へ
+                             // 親指: MCP(2)=(-30,-30), IP(3), TIP(4) は伸展時さらに外側へ
         pts[1] = [-15.0, -15.0];
         pts[2] = [-30.0, -30.0];
         pts[3] = [-45.0, -40.0];
@@ -547,5 +613,30 @@ mod tests {
         assert!((anchors[1152][0] - 0.04166666).abs() < 1e-6); // stride16 先頭
         assert!((anchors[2015][0] - 0.9583333).abs() < 1e-6);
         assert!((anchors[2015][1] - 0.9583333).abs() < 1e-6);
+    }
+
+    #[test]
+    fn crop_rejects_invalid_or_non_intersecting_bbox() {
+        let frame = RgbBuf::new(8, 6);
+
+        for bbox in [
+            [10.0, 1.0, 12.0, 3.0],
+            [-12.0, 1.0, -10.0, 3.0],
+            [1.0, 1.0, 1.0, 3.0],
+            [f32::NAN, 1.0, 3.0, 3.0],
+        ] {
+            assert!(crop_and_pad(&frame, &bbox, 0.0, 1.0, false).is_none());
+        }
+    }
+
+    #[test]
+    fn crop_keeps_valid_intersection_at_frame_edge() {
+        let frame = RgbBuf::new(8, 6);
+        let (crop, clipped, _) = crop_and_pad(&frame, &[-2.0, 1.0, 3.0, 5.0], 0.0, 1.0, false)
+            .expect("画像と交差する bbox は切り出せるべきです");
+
+        assert_eq!(clipped, [0.0, 1.0, 3.0, 5.0]);
+        assert_eq!((crop.width, crop.height), (4, 4));
+        assert_eq!(crop.data.len(), 4 * 4 * 3);
     }
 }

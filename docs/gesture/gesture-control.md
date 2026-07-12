@@ -43,7 +43,7 @@
 ```ts
 {
   handDetected: boolean;
-  gesture: "Rock" | "Scissors" | "Paper" | "Unknown";
+  gesture: "Rock" | "Scissors" | "Paper" | "ThumbsUp" | "ThumbsDown" | "Unknown";
   confidence: number;
   roomStatus: string | null;  // gestureStatusMap 適用結果
 }

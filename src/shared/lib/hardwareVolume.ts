@@ -1,5 +1,20 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
+let requestedVolume: number | null = null;
+let applyQueue: Promise<void> | null = null;
+
+async function drainVolumeQueue(): Promise<void> {
+  while (requestedVolume !== null) {
+    const percent = requestedVolume;
+    requestedVolume = null;
+    try {
+      await invoke("set_system_volume", { percent });
+    } catch (err) {
+      console.error("[hardware-volume] 音量設定に失敗:", err);
+    }
+  }
+}
+
 /**
  * スピーカーのハードウェア音量(ALSA ミキサー)を設定する。
  * ソフトウェア音量(HTMLAudioElement.volume)ではなく端末の実音量を操作する。
@@ -7,10 +22,14 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
  */
 export async function applyHardwareVolume(percent: number): Promise<void> {
   if (!isTauri()) return;
-  const clamped = Math.min(100, Math.max(0, Math.round(percent)));
-  try {
-    await invoke("set_system_volume", { percent: clamped });
-  } catch (err) {
-    console.error("[hardware-volume] 音量設定に失敗:", err);
+  // スライダー操作中は中間値を積み上げず最新値だけを次に適用する。
+  requestedVolume = Math.min(100, Math.max(0, Math.round(percent)));
+  if (!applyQueue) {
+    applyQueue = drainVolumeQueue().finally(() => {
+      applyQueue = null;
+      // drain終了直前に新しい値が入った場合も取りこぼさない。
+      if (requestedVolume !== null) void applyHardwareVolume(requestedVolume);
+    });
   }
+  await applyQueue;
 }

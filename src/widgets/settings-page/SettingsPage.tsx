@@ -1,11 +1,12 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { useAppVersion } from "@/shared/hooks/useAppVersion";
 import { useSettings, type AppSettings } from "@/shared/hooks/useSettings";
+import { isValidJsonTemplate } from "@/shared/lib/apiBodyTemplate";
 import { applyAccentAttribute } from "@/shared/theme/ThemeContext";
 import { playUiSound } from "@/shared/lib/uiSound";
 import { ConfirmDialog } from "@/shared/ui/ConfirmDialog";
-import { restartComputer } from "@/widgets/system-control-panel/api";
+import { restartComputer } from "@/shared/lib/systemCommands";
 import {
   ArrowLeftIcon,
   BracesIcon,
@@ -56,6 +57,39 @@ const SECTIONS: { id: SectionId; label: string; en: string; icon: IconType }[] =
   { id: "system", label: "システム", en: "SYSTEM", icon: ServerIcon },
 ];
 
+function validateSettings(settings: AppSettings): string | null {
+  const invalid: string[] = [];
+  if (!isValidJsonTemplate(settings.descriptorBodyTemplate)) {
+    invalid.push("顔特徴ベクトル登録");
+  }
+  if (!isValidJsonTemplate(settings.attendanceBodyTemplate)) {
+    invalid.push("在室状況更新");
+  }
+  if (invalid.length > 0) {
+    return `${invalid.join("・")}のAPIボディが正しいJSONではありません`;
+  }
+
+  const endpoints: Array<[string, string, readonly string[]]> = [
+    ["メンバー取得API", settings.getEndpoint, ["http:", "https:"]],
+    ["顔登録API", settings.postEndpoint, ["http:", "https:"]],
+    ["在室更新API", settings.attendanceEndpoint, ["http:", "https:"]],
+    ["WebSocket", settings.wsEndpoint, ["ws:", "wss:"]],
+  ];
+  for (const [label, value, protocols] of endpoints) {
+    if (!value) continue;
+    try {
+      if (!protocols.includes(new URL(value).protocol)) return `${label}のURL形式が不正です`;
+    } catch {
+      return `${label}のURL形式が不正です`;
+    }
+  }
+  return null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * 設定「ページ」。歯車ボタンから遷移してくるフルスクリーンの画面で、
  * 左のサイドバーで設定グループを切り替える(GitHub の設定画面に近い構成)。
@@ -71,8 +105,12 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [activeSection, setActiveSection] = useState<SectionId>("general");
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const [isConfirmingSave, setIsConfirmingSave] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // state の再レンダーより先に二重クリックされても、保存処理を1本に制限する。
+  const saveInFlightRef = useRef(false);
   const version = useAppVersion();
 
   // draft の初期化は設定の非同期ロード完了時に一度だけ行う。
@@ -98,22 +136,68 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   // 編集内容が保存済みの設定と異なるか(未保存の変更があるか)
   const isDirty = JSON.stringify(draft) !== JSON.stringify(settings);
 
-  async function commitSave() {
+  function reportValidationError(message: string) {
     setIsConfirmingSave(false);
-    await updateSettings(draft);
-    playUiSound("success");
-    setSavedAt(Date.now());
-    // 設定変更(特にエンドポイント類)を確実に反映させるため、実機では保存後に自動再起動する
-    if (isTauri()) {
-      setIsRestarting(true);
-      await restartComputer();
+    setActiveSection(message.includes("URL") ? "connection" : "apibody");
+    setSaveError(message);
+    playUiSound("error");
+  }
+
+  async function commitSave() {
+    if (saveInFlightRef.current) return;
+
+    const validationError = validateSettings(draft);
+    if (validationError) {
+      reportValidationError(validationError);
+      return;
+    }
+
+    saveInFlightRef.current = true;
+    setIsConfirmingSave(false);
+    setIsSaving(true);
+    setIsRestarting(false);
+    setSaveError(null);
+    // 失敗時に再試行できるよう、今回の処理が最後まで完了するまでは保存済みにしない。
+    setSavedAt(null);
+
+    let phase: "save" | "restart" = "save";
+    try {
+      // updateSettings の完了は、デバウンスされたstore.saveまで完了したことを意味する。
+      await updateSettings(draft);
+
+      // 設定変更(特にエンドポイント類)を確実に反映させるため、実機では保存後に自動再起動する。
+      if (isTauri()) {
+        phase = "restart";
+        setIsRestarting(true);
+        await restartComputer();
+      }
+
+      setSavedAt(Date.now());
+      playUiSound("success");
+    } catch (error) {
+      const action = phase === "save" ? "設定の保存" : "端末の再起動";
+      setSaveError(`${action}に失敗しました: ${errorMessage(error)}`);
+      setIsRestarting(false);
+      playUiSound("error");
+    } finally {
+      saveInFlightRef.current = false;
+      setIsSaving(false);
     }
   }
 
   function handleSave(e: FormEvent) {
     e.preventDefault();
+    if (saveInFlightRef.current || isSaving || isRestarting || isConfirmingSave) return;
+
+    const validationError = validateSettings(draft);
+    if (validationError) {
+      reportValidationError(validationError);
+      return;
+    }
+
+    setSaveError(null);
     // 実機では保存後に自動再起動するため、初回送信では確認を挟む
-    if (isTauri() && !isConfirmingSave) {
+    if (isTauri()) {
       setIsConfirmingSave(true);
       return;
     }
@@ -144,6 +228,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           <button
             type="button"
             onClick={onClose}
+            disabled={isSaving || isRestarting}
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 text-slate-600 transition hover:border-cyan-500/50 hover:text-cyan-600 dark:border-white/10 dark:text-slate-300 dark:hover:border-cyan-400/50 dark:hover:text-cyan-400"
             aria-label="戻る"
           >
@@ -171,18 +256,39 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           <button
             type="submit"
             form="settings-form"
-            disabled={isRestarting || (!isDirty && savedAt !== null)}
+            disabled={
+              isSaving ||
+              isRestarting ||
+              isConfirmingSave ||
+              (!isDirty && saveError === null)
+            }
             className="flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 shadow-glow transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
           >
-            {isRestarting ? (
+            {isSaving || isRestarting ? (
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />
             ) : (
               <CheckIcon className="h-4 w-4" />
             )}
-            保存
+            {isRestarting ? "再起動中…" : isSaving ? "保存中…" : "保存"}
           </button>
         </div>
       </header>
+
+      {saveError && (
+        <div
+          role="alert"
+          className="relative z-10 flex shrink-0 items-center justify-between gap-4 border-b border-rose-200 bg-rose-50 px-6 py-2.5 text-sm text-rose-700 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300"
+        >
+          <span>[settings] {saveError}</span>
+          <button
+            type="button"
+            onClick={() => setSaveError(null)}
+            className="shrink-0 rounded-md border border-rose-300 px-2 py-1 text-xs transition hover:bg-rose-100 dark:border-rose-500/30 dark:hover:bg-rose-500/10"
+          >
+            閉じる
+          </button>
+        </div>
+      )}
 
       {/* 本体: サイドバー + コンテンツ */}
       <div className="relative z-10 flex min-h-0 flex-1">
@@ -194,6 +300,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
               <button
                 key={id}
                 type="button"
+                aria-current={active ? "page" : undefined}
                 onClick={() => setActiveSection(id)}
                 className={`group relative mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${
                   active
@@ -265,8 +372,10 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             </>
           }
           confirmButtonClass="bg-amber-500 hover:bg-amber-400 text-white"
-          busy={isRestarting}
-          onCancel={() => setIsConfirmingSave(false)}
+          busy={isSaving || isRestarting}
+          onCancel={() => {
+            if (!saveInFlightRef.current) setIsConfirmingSave(false);
+          }}
           onConfirm={() => void commitSave()}
         />
       )}

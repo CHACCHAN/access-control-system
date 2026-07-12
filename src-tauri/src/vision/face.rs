@@ -12,7 +12,7 @@ use super::geometry::{
     apply_affine, estimate_similarity, invert_affine, letterbox, nms, warp_affine, Affine, DetBox,
     RgbBuf,
 };
-use super::runtime::{elapsed_ms, load_session, run_single_input, Session};
+use super::runtime::{elapsed_ms, load_session, run_single_input, ModelSession};
 use std::time::Instant;
 
 /// SCRFD の入力サイズ。buffalo_l 標準は 640 だが、本キオスクは近距離の
@@ -60,9 +60,9 @@ pub struct FaceDetection {
 }
 
 pub struct FaceEngine {
-    det: Session,
-    landmark: Session,
-    recognition: Session,
+    det: ModelSession,
+    landmark: ModelSession,
+    recognition: ModelSession,
 }
 
 impl FaceEngine {
@@ -107,7 +107,10 @@ impl FaceEngine {
 
             let grid = DET_INPUT_SIZE / stride;
             let count = grid * grid * DET_NUM_ANCHORS;
-            let scores = scores.view().into_shape_with_order((count,)).map_err(|e| e.to_string())?;
+            let scores = scores
+                .view()
+                .into_shape_with_order((count,))
+                .map_err(|e| e.to_string())?;
             let bbox_preds = bbox_preds
                 .view()
                 .into_shape_with_order((count, 4))
@@ -157,23 +160,20 @@ impl FaceEngine {
                     *dst = [src[0] / s, src[1] / s];
                 }
                 FaceDetection {
-                    bbox: [
-                        d.bbox[0] / s,
-                        d.bbox[1] / s,
-                        d.bbox[2] / s,
-                        d.bbox[3] / s,
-                    ],
+                    bbox: [d.bbox[0] / s, d.bbox[1] / s, d.bbox[2] / s, d.bbox[3] / s],
                     score: d.score,
                     kps,
                 }
             })
             .collect::<Vec<_>>();
 
-        eprintln!(
-            "[vision] 顔検出: {}ms ({}件)",
-            elapsed_ms(started),
-            results.len()
-        );
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "[vision] 顔検出: {}ms ({}件)",
+                elapsed_ms(started),
+                results.len()
+            );
+        }
         Ok(results)
     }
 
@@ -234,7 +234,9 @@ impl FaceEngine {
             })
             .collect();
 
-        eprintln!("[vision] 106点ランドマーク: {}ms", elapsed_ms(started));
+        if cfg!(debug_assertions) {
+            eprintln!("[vision] 106点ランドマーク: {}ms", elapsed_ms(started));
+        }
         Ok(Some(pts))
     }
 
@@ -282,7 +284,9 @@ impl FaceEngine {
 
         let norm = flat.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-12);
         let embedding = flat.into_iter().map(|v| v / norm).collect();
-        eprintln!("[vision] embedding抽出: {}ms", elapsed_ms(started));
+        if cfg!(debug_assertions) {
+            eprintln!("[vision] embedding抽出: {}ms", elapsed_ms(started));
+        }
         Ok(embedding)
     }
 }

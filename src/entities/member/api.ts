@@ -4,19 +4,14 @@
 // fetch で、いずれも「設定画面に入力したエンドポイント」へ実際に通信する。
 import { httpFetch } from "@/shared/lib/httpClient";
 import { applyBodyTemplate } from "@/shared/lib/apiBodyTemplate";
+import { parseMembers, type Member } from "./model";
 
-export type AttendanceStatus = "在室" | "外出" | "帰宅";
-
-export interface Member {
-  username: string;
-  name: string;
-  status: AttendanceStatus;
-  descriptor?: number[];
-}
+export type { AttendanceStatus, Member } from "./model";
 
 export async function fetchMembers(
   getEndpoint: string,
   apiToken: string,
+  signal?: AbortSignal,
 ): Promise<Member[]> {
   if (!getEndpoint) {
     throw new Error(
@@ -28,8 +23,11 @@ export async function fetchMembers(
   try {
     response = await httpFetch(getEndpoint, {
       headers: { Authorization: apiToken },
+      ...(signal ? { signal } : {}),
     });
   } catch (err) {
+    // 新しい再取得やunmountによる意図的な中断は接続障害として記録しない。
+    if (signal?.aborted) throw err;
     // DNS解決失敗・TLSエラー・タイムアウト等、純粋なネットワーク/接続レベルの失敗。
     // (実機の plugin-http は CORS 制約を受けないが、開発時のブラウザ fetch は
     //  CORS 制約を受けるため、ここに来ることがある)
@@ -46,7 +44,15 @@ export async function fetchMembers(
     );
     throw new Error(`メンバー一覧の取得に失敗しました: ${response.status}`);
   }
-  const members: Member[] = await response.json();
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (err) {
+    throw new Error(
+      `メンバー一覧APIのJSONを解析できません: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const members: Member[] = parseMembers(payload);
   console.log(`[fetchMembers] ${members.length}件取得しました`);
   return members;
 }
@@ -86,9 +92,15 @@ export async function registerDescriptor(
     throw new Error("顔特徴ベクトル登録APIが未設定です。設定画面で入力してください");
   }
 
+  if (descriptor.length !== 512 || descriptor.some((value) => !Number.isFinite(value))) {
+    throw new Error("顔特徴ベクトルが不正です(512次元の有限数値が必要です)");
+  }
+
   const body = applyBodyTemplate(bodyTemplate, { username, descriptor });
-  console.log(`[registerDescriptor] POST ${postEndpoint}/${username}`, body);
-  const response = await httpFetch(`${postEndpoint}/${username}`, {
+  const url = `${postEndpoint.replace(/\/+$/, "")}/${encodeURIComponent(username)}`;
+  // 生体情報である512次元descriptorをconsole/event logへ残さない。
+  console.log(`[registerDescriptor] POST ${url} (512次元descriptor)`);
+  const response = await httpFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

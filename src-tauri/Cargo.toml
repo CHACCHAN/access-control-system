@@ -1,7 +1,7 @@
 [package]
 name = "access-control-system"
 version = "0.2.31"
-description = "A Tauri App"
+description = "Laboratory attendance kiosk with face and gesture recognition"
 authors = ["Yuya Nakayama"]
 license = "MIT"
 edition = "2021"
@@ -19,8 +19,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["devtools"] }
-tauri-plugin-opener = "2"
+tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-store = "2.4.3"
@@ -46,17 +45,12 @@ ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "
 # 合わせる必要がある(0.17系)。
 ndarray = "0.17"
 
-# WebKitGTK 側のカメラ/マイク権限リクエスト(WebKitPermissionRequest)を
-# 明示的に許可するために使用。Tauri/wry がすでに同バージョンを依存グラフに
-# 含んでいるため、ここでバージョンを固定して型の一致を保証する。
-#
 # nokhwa/image/base64 は、WebKitGTK 経由の getUserMedia() が本キオスク環境
 # (PipeWire 未整備)では動作しないため、v4l2 を直接叩いてカメラフレームを
 # 取得し JPEG エンコードして Tauri イベントで渡す代替経路のために使用する。
 # ビルドには libclang-dev / libv4l-dev が必要(nokhwa の v4l2 バインディングが
 # bindgen 経由でヘッダーを読むため)。
 [target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
-webkit2gtk = "=2.0.2"
 nokhwa = { version = "0.10", features = ["input-native"] }
 # nokhwa はデバイスのフォーマット列挙が空だと開けない(v4l2loopback 等)。
 # v4l で「現在の出力フォーマット」を直接照会し、Exact 要求で開くために使う。
@@ -64,4 +58,3 @@ nokhwa = { version = "0.10", features = ["input-native"] }
 v4l = "0.14"
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 base64 = "0.22"
-

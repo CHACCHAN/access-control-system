@@ -32,6 +32,8 @@
   許可ヘッダー: `Authorization, Content-Type, Accept`
 - 転送失敗時は 502 でエラーメッセージを返す。
 - ポート番号はフロント(`httpClient.ts` の `DEV_PROXY_PORT`)と一致させること。
+  `scripts/dev.ts` が `DEV_PROXY_PORT` をVite公開変数へ引き継ぐため、環境変数で変更しても
+  両者は同じ値になる。中継はlocalhostだけで待ち受け、HTTP(S)以外へは転送しない。
 
 ## WebSocket
 

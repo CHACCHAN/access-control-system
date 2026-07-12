@@ -13,7 +13,8 @@ mod paths;
 mod runtime;
 
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -21,7 +22,7 @@ use tauri_plugin_store::StoreExt;
 
 use crate::camera_capture::SharedFrame;
 use face::{align_kps_from_106, FaceEngine};
-use geometry::RgbBuf;
+use geometry::{RgbBuf, RgbData};
 use gesture::{Gesture, GestureEngine};
 pub use overlay::OverlayState;
 use overlay::{FaceOverlay, HandOverlay};
@@ -43,6 +44,7 @@ const GESTURE_MAP_KEY: &str = "gestureStatusMap";
 const DEFAULT_ROCK_STATUS: &str = "在室";
 const DEFAULT_SCISSORS_STATUS: &str = "外出";
 const DEFAULT_PAPER_STATUS: &str = "帰宅";
+const MAX_ENROLLED_FACES: usize = 10_000;
 
 #[derive(Clone)]
 pub struct EnrolledFace {
@@ -53,6 +55,10 @@ pub struct EnrolledFace {
 
 #[derive(Default)]
 struct VisionInner {
+    model_load: Mutex<()>,
+    /// 各ONNX Sessionは内部4スレッドを使うため、顔と手を同時実行して
+    /// 4コア端末を過剰並列にしないよう推論パイプラインを直列化する。
+    inference: Mutex<()>,
     face: Mutex<Option<FaceEngine>>,
     gesture: Mutex<Option<GestureEngine>>,
     enrolled: RwLock<Vec<EnrolledFace>>,
@@ -101,39 +107,79 @@ pub struct EnrolledFaceInput {
 }
 
 impl VisionState {
-    /// モデルを(未ロードなら)ロードする。二重ロードはしない。
-    fn ensure_loaded(&self, app: &AppHandle) -> Result<(), String> {
-        let paths_needed = {
-            let face = self.0.face.lock().map_err(|_| "内部状態のロックに失敗しました")?;
-            let gesture = self.0.gesture.lock().map_err(|_| "内部状態のロックに失敗しました")?;
-            face.is_none() || gesture.is_none()
-        };
-        if !paths_needed {
+    fn ensure_face_loaded(&self, app: &AppHandle) -> Result<(), String> {
+        if self
+            .0
+            .face
+            .lock()
+            .map_err(|_| "内部状態のロックに失敗しました")?
+            .is_some()
+        {
             return Ok(());
         }
-
+        let _load_guard = self
+            .0
+            .model_load
+            .lock()
+            .map_err(|_| "モデル初期化ロックに失敗しました")?;
+        let mut face = self
+            .0
+            .face
+            .lock()
+            .map_err(|_| "内部状態のロックに失敗しました")?;
+        if face.is_some() {
+            return Ok(());
+        }
         let started = Instant::now();
         let resource_dir = app.path().resource_dir().ok();
         runtime::init_onnxruntime(&paths::resolve_onnxruntime_lib(resource_dir.clone())?)?;
-        let paths = paths::ModelPaths::resolve(resource_dir)?;
-
-        {
-            let mut face = self.0.face.lock().map_err(|_| "内部状態のロックに失敗しました")?;
-            if face.is_none() {
-                *face = Some(FaceEngine::load(&paths)?);
-            }
-        }
-        {
-            let mut gesture = self.0.gesture.lock().map_err(|_| "内部状態のロックに失敗しました")?;
-            if gesture.is_none() {
-                *gesture = Some(GestureEngine::load(&paths)?);
-            }
-        }
+        let paths = paths::ModelPaths::resolve_face(resource_dir)?;
+        *face = Some(FaceEngine::load(&paths)?);
         eprintln!(
-            "[vision] 全モデルのロード完了: {}ms",
+            "[vision] 顔認証モデルのロード完了: {}ms",
             started.elapsed().as_millis()
         );
         Ok(())
+    }
+
+    fn ensure_gesture_loaded(&self, app: &AppHandle) -> Result<(), String> {
+        if self
+            .0
+            .gesture
+            .lock()
+            .map_err(|_| "内部状態のロックに失敗しました")?
+            .is_some()
+        {
+            return Ok(());
+        }
+        let _load_guard = self
+            .0
+            .model_load
+            .lock()
+            .map_err(|_| "モデル初期化ロックに失敗しました")?;
+        let mut gesture = self
+            .0
+            .gesture
+            .lock()
+            .map_err(|_| "内部状態のロックに失敗しました")?;
+        if gesture.is_some() {
+            return Ok(());
+        }
+        let started = Instant::now();
+        let resource_dir = app.path().resource_dir().ok();
+        runtime::init_onnxruntime(&paths::resolve_onnxruntime_lib(resource_dir.clone())?)?;
+        let paths = paths::ModelPaths::resolve_gesture(resource_dir)?;
+        *gesture = Some(GestureEngine::load(&paths)?);
+        eprintln!(
+            "[vision] ジェスチャーモデルのロード完了: {}ms",
+            started.elapsed().as_millis()
+        );
+        Ok(())
+    }
+
+    fn ensure_loaded(&self, app: &AppHandle) -> Result<(), String> {
+        self.ensure_face_loaded(app)?;
+        self.ensure_gesture_loaded(app)
     }
 }
 
@@ -143,16 +189,18 @@ fn latest_frame(shared: &SharedFrame) -> Result<RgbBuf, String> {
         .0
         .lock()
         .map_err(|_| "フレーム共有状態のロックに失敗しました")?;
-    let frame = guard
-        .as_ref()
-        .ok_or("カメラフレームがまだ届いていません。カメラキャプチャが動作しているか確認してください")?;
+    let frame = guard.as_ref().ok_or(
+        "カメラフレームがまだ届いていません。カメラキャプチャが動作しているか確認してください",
+    )?;
     if frame.captured_at.elapsed().as_millis() > FRAME_STALE_MS {
-        return Err("カメラフレームが古すぎます(キャプチャが停止している可能性があります)".to_string());
+        return Err(
+            "カメラフレームが古すぎます(キャプチャが停止している可能性があります)".to_string(),
+        );
     }
     Ok(RgbBuf {
         width: frame.width as usize,
         height: frame.height as usize,
-        data: frame.rgb.clone(),
+        data: RgbData::from(frame.rgb.clone()),
     })
 }
 
@@ -166,6 +214,15 @@ pub async fn init_vision(app: AppHandle, state: State<'_, VisionState>) -> Resul
         .map_err(|e| format!("推論基盤の初期化タスクが失敗しました: {e}"))?
 }
 
+/// 顔認証だけを初期化する。ジェスチャーモデルの障害で顔認証まで停止させない。
+#[tauri::command]
+pub async fn init_face_vision(app: AppHandle, state: State<'_, VisionState>) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.ensure_face_loaded(&app))
+        .await
+        .map_err(|e| format!("顔認証基盤の初期化タスクが失敗しました: {e}"))?
+}
+
 /// 登録済み顔 embedding の一覧を差し替える(メンバー一覧の取得・顔登録の
 /// たびにフロントから同期される)。512次元以外は無視して件数を返す。
 #[tauri::command]
@@ -173,24 +230,35 @@ pub fn set_enrolled_faces(
     state: State<'_, VisionState>,
     faces: Vec<EnrolledFaceInput>,
 ) -> Result<usize, String> {
-    let mut valid = Vec::with_capacity(faces.len());
-    for face in faces {
+    let capacity = faces.len().min(MAX_ENROLLED_FACES);
+    let mut valid = Vec::with_capacity(capacity);
+    let mut usernames = HashSet::with_capacity(capacity);
+    for face in faces.into_iter().take(MAX_ENROLLED_FACES) {
+        if face.username.trim().is_empty() || face.username.len() > 256 {
+            eprintln!("[vision] 不正なusernameのembeddingを照合対象外にしました");
+            continue;
+        }
         if face.embedding.len() != 512 {
             // faceapi.js 時代の128次元ベクトルが残っているメンバーは照合対象外
             eprintln!(
-                "[vision] {} の embedding は {}次元のため照合対象外(512次元のみ対応)",
-                face.username,
+                "[vision] {}次元のembeddingを照合対象外にしました(512次元のみ対応)",
                 face.embedding.len()
             );
             continue;
         }
-        let norm = face
-            .embedding
-            .iter()
-            .map(|v| v * v)
-            .sum::<f32>()
-            .sqrt()
-            .max(1e-12);
+        if face.embedding.iter().any(|v| !v.is_finite()) {
+            eprintln!("[vision] 非有限値を含むembeddingを照合対象外にしました");
+            continue;
+        }
+        let norm = face.embedding.iter().map(|v| v * v).sum::<f32>().sqrt();
+        if norm <= 1e-6 {
+            eprintln!("[vision] ゼロベクトルのembeddingを照合対象外にしました");
+            continue;
+        }
+        if !usernames.insert(face.username.clone()) {
+            eprintln!("[vision] 重複したusernameのembeddingを照合対象外にしました");
+            continue;
+        }
         valid.push(EnrolledFace {
             username: face.username,
             embedding: face.embedding.iter().map(|v| v / norm).collect(),
@@ -213,16 +281,33 @@ pub async fn recognize_face(
     state: State<'_, VisionState>,
     frame_state: State<'_, SharedFrame>,
     overlay_state: State<'_, OverlayState>,
+    match_faces: Option<bool>,
+    include_landmarks: Option<bool>,
+    min_match_face_width_ratio: Option<f32>,
 ) -> Result<FaceAuthResult, String> {
     let state = state.inner().clone();
     let shared = frame_state.inner().clone();
     let overlay = overlay_state.inner().clone();
 
     tauri::async_runtime::spawn_blocking(move || {
-        state.ensure_loaded(&app)?;
+        state.ensure_face_loaded(&app)?;
         let perf = crate::settings::load_perf(&app);
+        let match_faces = match_faces.unwrap_or(true);
+        let include_landmarks = include_landmarks.unwrap_or(true);
+        // フロントがこの比率未満の結果を採用しない場合、Rust側でも重い後段処理を
+        // 省略する。ただし管理者設定の最小値より緩くはしない。
+        let match_face_width_ratio = min_match_face_width_ratio
+            .filter(|v| v.is_finite())
+            .unwrap_or(perf.min_face_width_ratio)
+            .clamp(perf.min_face_width_ratio, 0.9);
         let frame = latest_frame(&shared)?;
         let total_started = Instant::now();
+
+        let _inference_guard = state
+            .0
+            .inference
+            .lock()
+            .map_err(|_| "推論実行ロックに失敗しました")?;
 
         let mut engine_guard = state
             .0
@@ -260,28 +345,46 @@ pub async fn recognize_face(
             best_bbox[3] - best_bbox[1],
         ]);
 
-        // オーバーレイ描画用の106点ランドマーク(照合の有無に関わらず常に取得)。
-        // これはアライメント用の5点導出にも再利用する。
-        let landmarks = engine.landmarks_106(&frame, &best_bbox)?.unwrap_or_default();
-
-        // 顔が小さすぎる(遠い)うちは高コストな照合はしない
         let face_width_ratio = (best_bbox[2] - best_bbox[0]) / frame.width as f32;
-        if face_width_ratio >= perf.min_face_width_ratio {
-            let enrolled = state
+        // 確認カード中は顔の有無だけ、遠い顔はbboxだけで十分。登録画面では
+        // match_faces=false/include_landmarks=true として可視化を維持する。
+        let should_match = match_faces && face_width_ratio >= match_face_width_ratio;
+        let should_refine = if match_faces {
+            should_match
+        } else {
+            include_landmarks
+        };
+        let landmarks = if should_refine {
+            engine
+                .landmarks_106(&frame, &best_bbox)?
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        if should_match {
+            let has_enrolled = !state
                 .0
                 .enrolled
                 .read()
                 .map_err(|_| "内部状態のロックに失敗しました")?
-                .clone();
-            if !enrolled.is_empty() {
+                .is_empty();
+            if has_enrolled {
                 // 106点からアライメント5点を導出(失敗時は SCRFD の5点)
                 let kps = align_kps_from_106(&landmarks, &best_bbox).unwrap_or(best_kps);
                 let embedding = engine.embed(&frame, &kps)?;
 
+                // 一覧は読み取りロック下で参照し、推論ごとの全embedding cloneを避ける。
+                let enrolled = state
+                    .0
+                    .enrolled
+                    .read()
+                    .map_err(|_| "内部状態のロックに失敗しました")?;
+
                 // 1:N 照合(全件コサイン類似度)
                 let mut best_match: Option<(&EnrolledFace, f32)> = None;
                 let mut second_score = f32::MIN;
-                for face in &enrolled {
+                for face in enrolled.iter() {
                     let score = face::cosine_similarity(&embedding, &face.embedding);
                     match &best_match {
                         Some((_, top)) if score <= *top => {
@@ -306,10 +409,12 @@ pub async fn recognize_face(
                         result.recognized = true;
                         result.user_id = Some(face.username.clone());
                     }
-                    eprintln!(
-                        "[vision] 照合: best={} score={:.3} second={:.3} recognized={}",
-                        face.username, score, second_score, result.recognized
-                    );
+                    if cfg!(debug_assertions) {
+                        eprintln!(
+                            "[vision] 照合: score={:.3} second={:.3} recognized={}",
+                            score, second_score, result.recognized
+                        );
+                    }
                 }
             }
         }
@@ -321,10 +426,12 @@ pub async fn recognize_face(
             recognized: result.recognized,
         });
 
-        eprintln!(
-            "[vision] 顔認証パイプライン合計: {}ms",
-            total_started.elapsed().as_millis()
-        );
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "[vision] 顔認証パイプライン合計: {}ms",
+                total_started.elapsed().as_millis()
+            );
+        }
         Ok(result)
     })
     .await
@@ -343,9 +450,15 @@ pub async fn capture_face_embedding(
     let shared = frame_state.inner().clone();
 
     tauri::async_runtime::spawn_blocking(move || {
-        state.ensure_loaded(&app)?;
+        state.ensure_face_loaded(&app)?;
         let perf = crate::settings::load_perf(&app);
         let frame = latest_frame(&shared)?;
+
+        let _inference_guard = state
+            .0
+            .inference
+            .lock()
+            .map_err(|_| "推論実行ロックに失敗しました")?;
 
         let mut engine_guard = state
             .0
@@ -427,9 +540,15 @@ pub async fn detect_gesture(
     let app_for_map = app.clone();
 
     let (hand, total_ms) = tauri::async_runtime::spawn_blocking(move || {
-        state.ensure_loaded(&app)?;
+        state.ensure_gesture_loaded(&app)?;
         let frame = latest_frame(&shared)?;
         let started = Instant::now();
+
+        let _inference_guard = state
+            .0
+            .inference
+            .lock()
+            .map_err(|_| "推論実行ロックに失敗しました")?;
 
         let mut engine_guard = state
             .0
@@ -445,7 +564,9 @@ pub async fn detect_gesture(
     .await
     .map_err(|e| format!("ジェスチャー認識タスクが失敗しました: {e}"))??;
 
-    eprintln!("[vision] ジェスチャー認識パイプライン合計: {total_ms}ms");
+    if cfg!(debug_assertions) {
+        eprintln!("[vision] ジェスチャー認識パイプライン合計: {total_ms}ms");
+    }
 
     let Some(hand) = hand else {
         // 手が消えたらオーバーレイも消す
@@ -487,8 +608,15 @@ const WAKE_POLL_INTERVAL: Duration = Duration::from_millis(1500);
 /// 人感復帰時にフロントへ送るイベント名
 const WAKE_EVENT: &str = "display-woken";
 
+#[derive(Default)]
+struct WakeWatchInner {
+    /// 0は停止中、それ以外は現在の監視世代。世代値でstop→startのABAを防ぐ。
+    active_generation: AtomicU64,
+    next_generation: AtomicU64,
+}
+
 #[derive(Clone, Default)]
-pub struct WakeWatchState(Arc<AtomicBool>);
+pub struct WakeWatchState(Arc<WakeWatchInner>);
 
 /// 人感復帰の監視を開始する(消灯開始時にフロントから呼ぶ)。
 /// 既に監視中なら何もしない。人を検出すると画面を点灯し、`display-woken`
@@ -500,26 +628,39 @@ pub fn start_wake_watch(
     frame_state: State<'_, SharedFrame>,
     watch: State<'_, WakeWatchState>,
 ) -> Result<(), String> {
-    if watch.0.swap(true, Ordering::SeqCst) {
+    let generation = watch
+        .0
+        .next_generation
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1);
+    if watch
+        .0
+        .active_generation
+        .compare_exchange(0, generation, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         return Ok(()); // 既に監視中
     }
-    let flag = watch.0.clone();
+    let watch_state = watch.0.clone();
     let state = state.inner().clone();
     let shared = frame_state.inner().clone();
 
     std::thread::spawn(move || {
         eprintln!("[wake-watch] 人感復帰の監視を開始");
-        while flag.load(Ordering::SeqCst) {
+        while watch_state.active_generation.load(Ordering::SeqCst) == generation {
             std::thread::sleep(WAKE_POLL_INTERVAL);
-            if !flag.load(Ordering::SeqCst) {
+            if watch_state.active_generation.load(Ordering::SeqCst) != generation {
                 break;
             }
-            if state.ensure_loaded(&app).is_err() {
+            if state.ensure_face_loaded(&app).is_err() {
                 continue;
             }
             // 検出とロックはこのブロック内で完結させ、sleep 中はロックを持たない
             let ratio = {
                 let Ok(frame) = latest_frame(&shared) else {
+                    continue;
+                };
+                let Ok(_inference_guard) = state.0.inference.lock() else {
                     continue;
                 };
                 let Ok(mut guard) = state.0.face.lock() else {
@@ -541,10 +682,33 @@ pub fn start_wake_watch(
                 "[wake-watch] 消灯中に顔検出: ratio={ratio:.2} (復帰しきい値 {WAKE_FACE_WIDTH_RATIO})"
             );
             if ratio >= WAKE_FACE_WIDTH_RATIO {
-                crate::display_force_on();
-                let _ = app.emit(WAKE_EVENT, ());
-                flag.store(false, Ordering::SeqCst);
-                eprintln!("[wake-watch] 人を検出 → 画面を点灯しました");
+                // この世代がまだ現役の場合だけ復帰を確定する。stop直後に新しい
+                // watcherが始まっていても、古いsleepスレッドが復活・多重化しない。
+                if watch_state
+                    .active_generation
+                    .compare_exchange(generation, 0, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
+                    match crate::display_force_on() {
+                        Ok(()) => {
+                            let _ = app.emit(WAKE_EVENT, ());
+                            eprintln!("[wake-watch] 人を検出 → 画面を点灯しました");
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[wake-watch] 画面の点灯に失敗しました。監視を継続します: {e}"
+                            );
+                            // この間に別世代が始まっていなければ同じ監視を再開する。
+                            if watch_state
+                                .active_generation
+                                .compare_exchange(0, generation, Ordering::SeqCst, Ordering::SeqCst)
+                                .is_ok()
+                            {
+                                continue;
+                            }
+                        }
+                    }
+                }
                 break;
             }
         }
@@ -556,7 +720,7 @@ pub fn start_wake_watch(
 /// 人感復帰の監視を停止する(操作による復帰などで消灯が解除されたとき)。
 #[tauri::command]
 pub fn stop_wake_watch(watch: State<'_, WakeWatchState>) {
-    watch.0.store(false, Ordering::SeqCst);
+    watch.0.active_generation.store(0, Ordering::SeqCst);
 }
 
 #[cfg(test)]
@@ -564,21 +728,34 @@ mod tests {
     use super::*;
 
     fn load_test_image(path: &str) -> RgbBuf {
-        let img = image::open(path).expect("テスト画像を読み込めません").to_rgb8();
+        let img = image::open(path)
+            .expect("テスト画像を読み込めません")
+            .to_rgb8();
         RgbBuf {
             width: img.width() as usize,
             height: img.height() as usize,
-            data: img.into_raw(),
+            data: img.into_raw().into(),
         }
     }
 
-    fn model_paths() -> paths::ModelPaths {
+    fn init_test_runtime() {
         runtime::init_onnxruntime(
             &paths::resolve_onnxruntime_lib(None)
                 .expect("libonnxruntime.so が未配置です(setup-models.sh を実行してください)"),
         )
         .expect("ONNX Runtime の初期化に失敗");
-        paths::ModelPaths::resolve(None).expect("モデルが未配置です(setup-models.sh を実行してください)")
+    }
+
+    fn face_model_paths() -> paths::ModelPaths {
+        init_test_runtime();
+        paths::ModelPaths::resolve_face(None)
+            .expect("モデルが未配置です(setup-models.sh を実行してください)")
+    }
+
+    fn gesture_model_paths() -> paths::ModelPaths {
+        init_test_runtime();
+        paths::ModelPaths::resolve_gesture(None)
+            .expect("モデルが未配置です(setup-models.sh を実行してください)")
     }
 
     /// 顔が写っていない画像では顔が検出されないこと、およびパイプラインが
@@ -592,7 +769,7 @@ mod tests {
             return;
         }
         let frame = load_test_image(path);
-        let mut engine = FaceEngine::load(&model_paths()).expect("モデルロード失敗");
+        let mut engine = FaceEngine::load(&face_model_paths()).expect("モデルロード失敗");
         let detections = engine.detect(&frame).expect("検出失敗");
         assert!(
             detections.is_empty(),
@@ -600,7 +777,7 @@ mod tests {
             detections.len()
         );
 
-        let mut gesture = GestureEngine::load(&model_paths()).expect("モデルロード失敗");
+        let mut gesture = GestureEngine::load(&gesture_model_paths()).expect("モデルロード失敗");
         let result = gesture.detect(&frame).expect("ジェスチャー推論失敗");
         assert!(result.is_none(), "顔なし画像から手を誤検出しました");
     }
@@ -617,7 +794,7 @@ mod tests {
             return;
         };
         let frame = load_test_image(&path);
-        let mut engine = FaceEngine::load(&model_paths()).expect("モデルロード失敗");
+        let mut engine = FaceEngine::load(&face_model_paths()).expect("モデルロード失敗");
 
         let detections = engine.detect(&frame).expect("検出失敗");
         assert!(!detections.is_empty(), "顔が検出できませんでした");
@@ -642,7 +819,10 @@ mod tests {
         let embedding = engine.embed(&frame, &kps).expect("embedding抽出失敗");
         assert_eq!(embedding.len(), 512);
         let norm: f32 = embedding.iter().map(|v| v * v).sum::<f32>().sqrt();
-        assert!((norm - 1.0).abs() < 1e-3, "embeddingが正規化されていません: {norm}");
+        assert!(
+            (norm - 1.0).abs() < 1e-3,
+            "embeddingが正規化されていません: {norm}"
+        );
 
         // 同一顔の再抽出 → ほぼ同一ベクトル
         let embedding2 = engine.embed(&frame, &kps).expect("embedding再抽出失敗");
@@ -676,12 +856,16 @@ mod tests {
             return;
         };
         let frame = load_test_image(&path);
-        let mut engine = GestureEngine::load(&model_paths()).expect("モデルロード失敗");
+        let mut engine = GestureEngine::load(&gesture_model_paths()).expect("モデルロード失敗");
         let result = engine
             .detect(&frame)
             .expect("ジェスチャー推論失敗")
             .expect("手が検出できませんでした");
         eprintln!("gesture={:?} conf={:.3}", result.gesture, result.confidence);
-        assert_eq!(result.gesture, Gesture::Paper, "開いた手のひらがパーと判定されません");
+        assert_eq!(
+            result.gesture,
+            Gesture::Paper,
+            "開いた手のひらがパーと判定されません"
+        );
     }
 }

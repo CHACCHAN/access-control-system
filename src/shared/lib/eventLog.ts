@@ -13,6 +13,7 @@ export interface LogEntry {
 
 // 長時間稼働するキオスクでメモリを圧迫しないよう、保持件数の上限を設ける。
 const MAX_ENTRIES = 1000;
+const MAX_MESSAGE_LENGTH = 4000;
 
 let entries: LogEntry[] = [];
 let nextId = 1;
@@ -38,11 +39,16 @@ function formatArg(arg: unknown): string {
  * 連結して1つのメッセージにする。
  */
 export function addLogEntry(level: LogLevel, ...args: unknown[]): void {
-  const message = args.map(formatArg).join(" ");
-  entries.push({ id: nextId++, timestamp: Date.now(), level, message });
-  if (entries.length > MAX_ENTRIES) {
-    entries = entries.slice(entries.length - MAX_ENTRIES);
-  }
+  const formatted = args.map(formatArg).join(" ");
+  const message =
+    formatted.length > MAX_MESSAGE_LENGTH
+      ? `${formatted.slice(0, MAX_MESSAGE_LENGTH)}…[truncated]`
+      : formatted;
+  // useSyncExternalStoreはObject.isでsnapshotを比較するため、追記時にも新しい
+  // 配列参照を作る。同じ参照へpushするとログ画面が更新されない。
+  entries = [...entries, { id: nextId++, timestamp: Date.now(), level, message }].slice(
+    -MAX_ENTRIES,
+  );
   notify();
 }
 

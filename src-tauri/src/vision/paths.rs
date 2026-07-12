@@ -34,43 +34,55 @@ impl ModelPaths {
         }
     }
 
-    fn all(&self) -> [&PathBuf; 5] {
-        [
-            &self.face_det,
-            &self.face_landmark,
-            &self.face_recognition,
-            &self.palm_detection,
-            &self.handpose,
-        ]
+    fn face_all(&self) -> [&PathBuf; 3] {
+        [&self.face_det, &self.face_landmark, &self.face_recognition]
     }
 
-    /// モデルディレクトリの候補から、5モデル全てが存在する最初のものを使う。
-    /// 1. Tauri のリソースディレクトリ(deb インストール後 / tauri build 時)
-    /// 2. ソースツリーの src-tauri/resources/models(cargo での開発時・テスト時)
-    pub fn resolve(resource_dir: Option<PathBuf>) -> Result<Self, String> {
-        let mut candidates: Vec<PathBuf> = Vec::new();
+    fn gesture_all(&self) -> [&PathBuf; 2] {
+        [&self.palm_detection, &self.handpose]
+    }
+
+    fn candidates(resource_dir: Option<PathBuf>) -> Vec<PathBuf> {
+        let mut candidates = Vec::new();
         if let Some(dir) = resource_dir {
             candidates.push(dir.join(MODELS_SUBDIR));
         }
-        candidates.push(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join(MODELS_SUBDIR),
-        );
+        candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join(MODELS_SUBDIR));
+        candidates
+    }
 
+    fn resolve_matching(
+        resource_dir: Option<PathBuf>,
+        group: &str,
+        exists: impl Fn(&Self) -> bool,
+    ) -> Result<Self, String> {
+        let candidates = Self::candidates(resource_dir);
         for dir in &candidates {
             let paths = Self::from_models_dir(dir);
-            if paths.all().iter().all(|p| p.exists()) {
+            if exists(&paths) {
                 return Ok(paths);
             }
         }
-
         Err(format!(
-            "モデルファイルが見つかりません。.devcontainer/setup-models.sh を実行してモデルを取得してください(探索先: {})",
+            "{group}モデルが見つかりません。.devcontainer/setup-models.sh を実行してください(探索先: {})",
             candidates
                 .iter()
                 .map(|p| p.display().to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         ))
+    }
+
+    pub fn resolve_face(resource_dir: Option<PathBuf>) -> Result<Self, String> {
+        Self::resolve_matching(resource_dir, "顔認証", |paths| {
+            paths.face_all().iter().all(|path| path.exists())
+        })
+    }
+
+    pub fn resolve_gesture(resource_dir: Option<PathBuf>) -> Result<Self, String> {
+        Self::resolve_matching(resource_dir, "ジェスチャー", |paths| {
+            paths.gesture_all().iter().all(|path| path.exists())
+        })
     }
 }
 

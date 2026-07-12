@@ -51,7 +51,7 @@ async function invokeQuiet(command: string): Promise<void> {
  *   間引かれることがあり、JS 側のポーリングでは復帰できないため。
  *   Rust が点灯まで済ませ、`display-woken` イベントで黒レイヤーだけ解除する。
  */
-export function ScreenDimmer() {
+export function ScreenDimmer({ onDimmedChange }: { onDimmedChange?: (dimmed: boolean) => void }) {
   const { settings } = useSettings();
   const [isDimmed, setIsDimmed] = useState(false);
   const lastActivityRef = useRef(Date.now());
@@ -60,6 +60,10 @@ export function ScreenDimmer() {
   isDimmedRef.current = isDimmed;
 
   const screenOffMinutes = settings.screenOffMinutes;
+
+  useEffect(() => {
+    onDimmedChange?.(isDimmed);
+  }, [isDimmed, onDimmedChange]);
 
   // ユーザー操作を常時監視して無操作タイマーをリセットする。
   // 消灯中の操作は復帰も兼ねる(黒レイヤーは pointer-events を持たないため

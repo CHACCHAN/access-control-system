@@ -1,8 +1,9 @@
+import { useMemo } from "react";
 import { useMembers } from "@/entities/member/MemberContext";
 import { ATTENDANCE_STATUSES } from "@/entities/member/statusStyle";
 import { FaceRegistrationForm } from "@/features/face-auth/FaceRegistrationForm";
 import { useSettings, type MemberListLayout } from "@/shared/hooks/useSettings";
-import type { AuthMode } from "@/app/App";
+import type { AuthMode } from "@/features/face-auth/model";
 import { MemberCard } from "./MemberCard";
 
 // 設定(appearance.memberListLayout)→ 一覧コンテナのクラス
@@ -30,8 +31,12 @@ export function MemberListPanel({ mode, setMode }: MemberListPanelProps) {
   const layout = settings.appearance.memberListLayout;
   const customBg = settings.appearance.memberPanelBg;
 
-  const sortedMembers = [...members].sort(
-    (a, b) => ATTENDANCE_STATUSES.indexOf(a.status) - ATTENDANCE_STATUSES.indexOf(b.status),
+  const sortedMembers = useMemo(
+    () =>
+      [...members].sort(
+        (a, b) => ATTENDANCE_STATUSES.indexOf(a.status) - ATTENDANCE_STATUSES.indexOf(b.status),
+      ),
+    [members],
   );
 
   return (

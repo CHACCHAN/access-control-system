@@ -8,29 +8,31 @@ mod camera_capture;
 mod settings;
 mod vision;
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 // バンドル対象が deb (Linux) のみのため systemctl を使う想定
-#[tauri::command]
-fn shutdown_computer() -> Result<(), String> {
-    std::process::Command::new("systemctl")
-        .arg("poweroff")
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    Ok(())
+fn run_systemctl(action: &'static str) -> Result<(), String> {
+    let status = std::process::Command::new("systemctl")
+        .arg(action)
+        .status()
+        .map_err(|e| format!("systemctl {action} を実行できません: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("systemctl {action} が失敗しました: {status}"))
+    }
 }
 
 #[tauri::command]
-fn restart_computer() -> Result<(), String> {
-    std::process::Command::new("systemctl")
-        .arg("reboot")
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    Ok(())
+async fn shutdown_computer() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| run_systemctl("poweroff"))
+        .await
+        .map_err(|e| format!("シャットダウン処理に失敗しました: {e}"))?
+}
+
+#[tauri::command]
+async fn restart_computer() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| run_systemctl("reboot"))
+        .await
+        .map_err(|e| format!("再起動処理に失敗しました: {e}"))?
 }
 
 // アプリを終了する。startx が本アプリを X セッションの唯一のクライアントとして
@@ -115,7 +117,11 @@ fn get_system_spec() -> SystemSpec {
 // 自動発動のタイマーだけをゼロにする(xset dpms 0 0 0)。
 #[cfg(target_os = "linux")]
 fn disable_x_screen_blanking() {
-    for args in [&["s", "off"][..], &["s", "noblank"][..], &["dpms", "0", "0", "0"][..]] {
+    for args in [
+        &["s", "off"][..],
+        &["s", "noblank"][..],
+        &["dpms", "0", "0", "0"][..],
+    ] {
         match std::process::Command::new("xset").args(args).status() {
             Ok(status) if status.success() => {}
             Ok(status) => eprintln!("[display] xset {args:?} が失敗しました: {status}"),
@@ -127,15 +133,27 @@ fn disable_x_screen_blanking() {
 
 /// DPMS でディスプレイを強制点灯する。フロントからの復帰(set_display_power)と
 /// Rust 側の人感復帰ウォッチャー(vision::start_wake_watch)の両方から使う。
-pub fn display_force_on() {
+pub fn display_force_on() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        let _ = std::process::Command::new("xset")
+        let dpms = std::process::Command::new("xset")
             .args(["dpms", "force", "on"])
-            .status();
+            .status()
+            .map_err(|e| format!("xset を実行できません: {e}"))?;
+        if !dpms.success() {
+            return Err(format!("xset dpms force on が失敗しました: {dpms}"));
+        }
         // スクリーンセーバー側の状態もリセットしておく
-        let _ = std::process::Command::new("xset").args(["s", "reset"]).status();
+        match std::process::Command::new("xset")
+            .args(["s", "reset"])
+            .status()
+        {
+            Ok(status) if status.success() => {}
+            Ok(status) => eprintln!("[display] xset s reset が失敗しました: {status}"),
+            Err(e) => eprintln!("[display] xset s reset を実行できません: {e}"),
+        }
     }
+    Ok(())
 }
 
 // ディスプレイの電源(DPMS)を制御する。
@@ -146,7 +164,7 @@ fn set_display_power(on: bool) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         if on {
-            display_force_on();
+            display_force_on()?;
         } else {
             let status = std::process::Command::new("xset")
                 .args(["dpms", "force", "off"])
@@ -288,75 +306,9 @@ fn get_network_info() -> Result<NetworkInfo, String> {
         .ok_or_else(|| "有効なネットワークインターフェースが見つかりません".to_string())
 }
 
-// Linux(webkit2gtk)ではカメラ/マイクへのアクセスは WebKitPermissionRequest
-// シグナルで制御される。ハンドラーを繋がないとデフォルトで拒否されるため、
-// メインウィンドウの WebView に対して明示的に許可するハンドラーを登録する。
-// このアプリはキオスク端末専用で、顔認証のためにカメラ常時利用を前提として
-// いるので、ユーザーへの都度確認は行わず自動許可する。
-#[cfg(target_os = "linux")]
-fn setup_webkit_media_permissions(app: &tauri::App) {
-    use tauri::Manager;
-    use webkit2gtk::{
-        glib::ObjectExt, DeviceInfoPermissionRequest, PermissionRequestExt, SettingsExt,
-        UserMediaPermissionRequest, WebViewExt,
-    };
-
-    let Some(window) = app.get_webview_window("main") else {
-        eprintln!("[webkit-permissions] メインウィンドウ(main)が見つかりませんでした");
-        return;
-    };
-
-    let result = window.with_webview(|webview| {
-        let webview = webview.inner();
-
-        match webview.settings() {
-            Some(settings) => {
-                settings.set_enable_media_stream(true);
-                // ページの console.log/console.error 等をプロセスの標準出力にも書き出す。
-                // これが無いと、フロントエンド側で仕込んだデバッグログ(console.log)は
-                // Web Inspector を開かない限りホスト側のログには一切残らない。
-                settings.set_enable_write_console_messages_to_stdout(true);
-                eprintln!(
-                    "[webkit-permissions] enable-media-stream / write-console-messages-to-stdout を有効化しました"
-                );
-            }
-            None => eprintln!("[webkit-permissions] settings() が取得できませんでした"),
-        }
-
-        // getUserMedia() は WebKitUserMediaPermissionRequest だけでなく、デバイス一覧
-        // (enumerateDevices のラベル解決)を確認するための WebKitDeviceInfoPermissionRequest
-        // を別途発行することがある。後者を許可し忘れると、getUserMedia の Promise が
-        // resolve も reject もされないまま無限に待ち続ける(=画面が "[...]" のまま止まる)
-        // 症状になるため、両方を明示的に許可する。
-        webview.connect_permission_request(|_webview, request| {
-            let is_user_media = request.is::<UserMediaPermissionRequest>();
-            let is_device_info = request.is::<DeviceInfoPermissionRequest>();
-            eprintln!(
-                "[webkit-permissions] permission-request 受信: user_media={is_user_media} device_info={is_device_info}"
-            );
-            if is_user_media || is_device_info {
-                request.allow();
-                eprintln!("[webkit-permissions] allow() を呼び出しました");
-                true
-            } else {
-                // カメラ/マイク以外(通知・位置情報等)の権限要求はこのハンドラーでは
-                // 扱わず、WebKit のデフォルト挙動(拒否)に委ねる。
-                false
-            }
-        });
-
-        eprintln!("[webkit-permissions] permission-request ハンドラーを登録しました");
-    });
-
-    if let Err(e) = result {
-        eprintln!("[webkit-permissions] with_webview に失敗しました: {e}");
-    }
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_http::init())
         .manage(camera_capture::CameraCaptureState::default())
@@ -366,7 +318,6 @@ pub fn run() {
         .manage(vision::WakeWatchState::default())
         .manage(SystemStatsState::default())
         .invoke_handler(tauri::generate_handler![
-            greet,
             shutdown_computer,
             restart_computer,
             exit_app,
@@ -379,6 +330,7 @@ pub fn run() {
             camera_capture::start_camera_capture,
             camera_capture::stop_camera_capture,
             vision::init_vision,
+            vision::init_face_vision,
             vision::set_enrolled_faces,
             vision::recognize_face,
             vision::capture_face_embedding,
@@ -386,10 +338,9 @@ pub fn run() {
             vision::start_wake_watch,
             vision::stop_wake_watch
         ])
-        .setup(|app| {
+        .setup(|_app| {
             #[cfg(target_os = "linux")]
             {
-                setup_webkit_media_permissions(app);
                 disable_x_screen_blanking();
             }
             Ok(())

@@ -1,4 +1,5 @@
-import type { Member } from "@/entities/member/api";
+import { memo } from "react";
+import type { Member } from "@/entities/member/model";
 import { STATUS_STYLE } from "@/entities/member/statusStyle";
 
 interface MemberCardProps {
@@ -9,7 +10,7 @@ interface MemberCardProps {
   variant?: "card" | "row";
 }
 
-export function MemberCard({ member, isActive, onSelect, variant = "card" }: MemberCardProps) {
+function MemberCardComponent({ member, isActive, onSelect, variant = "card" }: MemberCardProps) {
   const { cardClasses, badgeClasses } = STATUS_STYLE[member.status];
   const activeRing = isActive
     ? "ring-2 ring-cyan-400/70 ring-offset-2 ring-offset-slate-50 dark:ring-offset-[#070b14]"
@@ -59,3 +60,6 @@ export function MemberCard({ member, isActive, onSelect, variant = "card" }: Mem
     </button>
   );
 }
+
+/** 一覧内で変更の無いカードまで再描画しない。 */
+export const MemberCard = memo(MemberCardComponent);

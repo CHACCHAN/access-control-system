@@ -2,6 +2,7 @@
   "name": "access-control-system",
   "private": true,
   "version": "0.2.31",
+  "description": "顔認証とジェスチャーに対応した研究室向け在室管理キオスク",
   "license": "MIT",
   "author": "Yuya Nakayama",
   "type": "module",
@@ -9,13 +10,13 @@
     "dev": "bun run scripts/dev.ts",
     "dev:vite": "vite --host",
     "build": "tsc && vite build",
+    "test": "bun test",
     "preview": "vite preview",
     "tauri": "tauri"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-http": "^2.5.9",
-    "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-store": "^2.4.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

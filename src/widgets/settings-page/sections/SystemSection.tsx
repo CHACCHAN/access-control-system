@@ -5,7 +5,7 @@ import {
   exitToShell,
   restartComputer,
   shutdownComputer,
-} from "@/widgets/system-control-panel/api";
+} from "@/shared/lib/systemCommands";
 import { playUiSound } from "@/shared/lib/uiSound";
 import { ConfirmDialog } from "@/shared/ui/ConfirmDialog";
 import { PowerIcon, RestartIcon, ServerIcon, TerminalIcon } from "@/shared/ui/icons";

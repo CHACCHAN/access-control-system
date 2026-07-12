@@ -8,6 +8,16 @@ interface UseKioskSocketResult {
 
 // 切断時に再接続を試みるまでの間隔
 const RECONNECT_DELAY_MS = 5000;
+const UPDATE_DEBOUNCE_MS = 200;
+
+function isWebSocketUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "ws:" || url.protocol === "wss:";
+  } catch {
+    return false;
+  }
+}
 
 /**
  * キオスク端末向けの WebSocket クライアント。サーバーから更新シグナルを
@@ -36,14 +46,27 @@ export function useKioskSocket(
       setStatus("disconnected");
       return;
     }
+    if (!isWebSocketUrl(wsEndpoint)) {
+      console.error(`[kiosk-socket] WebSocket URLが不正です: ${wsEndpoint.slice(0, 200)}`);
+      setStatus("disconnected");
+      return;
+    }
 
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
+    let updateTimer: number | null = null;
     let cancelled = false;
 
     function connect() {
       setStatus("connecting");
-      socket = new WebSocket(wsEndpoint);
+      try {
+        socket = new WebSocket(wsEndpoint);
+      } catch (err) {
+        console.error("[kiosk-socket] 接続を開始できません:", err);
+        setStatus("disconnected");
+        reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
+        return;
+      }
 
       socket.onopen = () => {
         if (cancelled) return;
@@ -53,11 +76,16 @@ export function useKioskSocket(
 
       socket.onmessage = (event) => {
         if (cancelled) return;
-        console.info(`[kiosk-socket] シグナル受信: ${event.data}`);
+        const raw = String(event.data);
+        console.info(`[kiosk-socket] シグナル受信: ${raw.slice(0, 500)}`);
         try {
-          const data = JSON.parse(event.data);
+          const data = JSON.parse(raw);
           if (data?.[signalFieldRef.current] === signalValueRef.current) {
-            onUpdateSignalRef.current();
+            if (updateTimer !== null) window.clearTimeout(updateTimer);
+            updateTimer = window.setTimeout(() => {
+              updateTimer = null;
+              onUpdateSignalRef.current();
+            }, UPDATE_DEBOUNCE_MS);
           }
         } catch {
           // JSON でないメッセージは無視する
@@ -82,6 +110,7 @@ export function useKioskSocket(
     return () => {
       cancelled = true;
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (updateTimer !== null) window.clearTimeout(updateTimer);
       socket?.close();
     };
   }, [wsEndpoint]);

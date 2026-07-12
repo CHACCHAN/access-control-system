@@ -53,6 +53,7 @@ export function GeneralSection({ draft, setDraft }: SectionProps) {
                 <button
                   key={t}
                   type="button"
+                  aria-pressed={active}
                   onClick={() => {
                     if (active) return;
                     toggleTheme();
@@ -89,6 +90,7 @@ export function GeneralSection({ draft, setDraft }: SectionProps) {
             <input
               id="ui-scale"
               type="range"
+              aria-label="UIスケール"
               min={UI_SCALE_MIN}
               max={UI_SCALE_MAX}
               step={0.05}
@@ -141,6 +143,7 @@ export function GeneralSection({ draft, setDraft }: SectionProps) {
             <input
               id="hardware-volume"
               type="range"
+              aria-label="ハードウェア音量"
               min={0}
               max={100}
               step={5}

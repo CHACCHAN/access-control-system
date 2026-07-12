@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AttendanceStatus } from "@/entities/member/api";
+import type { AttendanceStatus } from "@/entities/member/model";
 import { useMembers } from "@/entities/member/MemberContext";
 import { useFaceAuth } from "@/features/face-auth/FaceAuthContext";
 import { CameraFeed } from "@/shared/ui/CameraFeed";
@@ -10,11 +10,11 @@ import {
   type FaceScanHint,
 } from "@/features/face-auth/useFaceRecognitionLoop";
 import { useGestureStatusLoop } from "@/features/gesture/useGestureStatusLoop";
-import { postAttendance } from "@/widgets/attendance-action-sheet/api";
+import { postAttendance } from "@/entities/member/attendanceApi";
 import { playUiSound } from "@/shared/lib/uiSound";
 import { ArrowUpIcon, GearIcon, ScanFaceIcon } from "@/shared/ui/icons";
 import { isAnimatedPattern, PATTERN_CLASS, useSettings } from "@/shared/hooks/useSettings";
-import type { AuthMode } from "@/app/App";
+import type { AuthMode } from "@/features/face-auth/model";
 
 const HINT_TEXT: Record<Exclude<FaceScanHint, null>, string> = {
   scanning: "顔を画面に近づけてください",
@@ -27,9 +27,16 @@ interface FaceAuthPanelProps {
   onOpenSettings: () => void;
   mode: AuthMode;
   setMode: (mode: AuthMode) => void;
+  /** 設定画面や消灯レイヤーの背後では推論・非接触POSTを停止する。 */
+  isInteractive: boolean;
 }
 
-export function FaceAuthPanel({ onOpenSettings, mode, setMode }: FaceAuthPanelProps) {
+export function FaceAuthPanel({
+  onOpenSettings,
+  mode,
+  setMode,
+  isInteractive,
+}: FaceAuthPanelProps) {
   const { settings } = useSettings();
   const customBg = settings.appearance.authPanelBg;
   // アニメーション付き背景(回路/信号)はこのパネルの背景にのみ描画する
@@ -52,7 +59,7 @@ export function FaceAuthPanel({ onOpenSettings, mode, setMode }: FaceAuthPanelPr
   const { hint, isInferring, matchedMember, dismissMatch } = useFaceRecognitionLoop({
     members,
     enrolledFaces,
-    active: !isPaused && visionReady && cameraStatus === "streaming",
+    active: isInteractive && !isPaused && visionReady && cameraStatus === "streaming",
     enableMatch: mode === "recognize",
   });
 
@@ -70,6 +77,8 @@ export function FaceAuthPanel({ onOpenSettings, mode, setMode }: FaceAuthPanelPr
   const [gestureCompleted, setGestureCompleted] = useState<AttendanceStatus | null>(null);
   const [gesturePosting, setGesturePosting] = useState(false);
   const dismissTimerRef = useRef<number | null>(null);
+  const matchedUsernameRef = useRef<string | null>(matchedMember?.username ?? null);
+  matchedUsernameRef.current = matchedMember?.username ?? null;
 
   // 対象メンバーが変わったら完了表示・タイマーをリセットする
   useEffect(() => {
@@ -82,7 +91,7 @@ export function FaceAuthPanel({ onOpenSettings, mode, setMode }: FaceAuthPanelPr
   }, [matchedMember?.username]);
 
   const { detectedGesture } = useGestureStatusLoop({
-    active: showConfirm && !gestureCompleted && !gesturePosting,
+    active: isInteractive && showConfirm && !gestureCompleted && !gesturePosting,
     onStatus: (status) => void handleGestureStatus(status),
     // サムズダウン(設定 rejectGesture)で「ちがう」= 確認カードを閉じて認証へ戻る
     onReject: () => {
@@ -94,6 +103,7 @@ export function FaceAuthPanel({ onOpenSettings, mode, setMode }: FaceAuthPanelPr
   async function handleGestureStatus(status: AttendanceStatus) {
     if (!matchedMember || gesturePosting || gestureCompleted) return;
     if (status === matchedMember.status) return; // 現在と同じステータスは記録しない
+    const username = matchedMember.username;
     setGesturePosting(true);
     try {
       await postAttendance(
@@ -104,18 +114,20 @@ export function FaceAuthPanel({ onOpenSettings, mode, setMode }: FaceAuthPanelPr
         settings.apiToken,
         settings.attendanceBodyTemplate,
       );
+      if (matchedUsernameRef.current !== username) return;
       playUiSound("success");
-      updateStatus(matchedMember.username, status);
+      updateStatus(username, status);
       setGestureCompleted(status);
       dismissTimerRef.current = window.setTimeout(() => {
         setGestureCompleted(null);
         dismissMatch();
       }, 1300);
     } catch (err) {
+      if (matchedUsernameRef.current !== username) return;
       playUiSound("error");
       console.error("[face-auth] ジェスチャー記録に失敗:", err);
     } finally {
-      setGesturePosting(false);
+      if (matchedUsernameRef.current === username) setGesturePosting(false);
     }
   }
 
@@ -210,6 +222,7 @@ export function FaceAuthPanel({ onOpenSettings, mode, setMode }: FaceAuthPanelPr
             onReject={dismissMatch}
             detectedGesture={detectedGesture}
             completedAction={gestureCompleted}
+            busy={gesturePosting}
           />
         )}
       </div>

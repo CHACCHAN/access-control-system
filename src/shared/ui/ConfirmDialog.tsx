@@ -1,6 +1,7 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useId, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { playUiSound } from "@/shared/lib/uiSound";
+import { useDialogAccessibility } from "@/shared/hooks/useDialogAccessibility";
 
 interface ConfirmDialogProps {
   /** 見出し(eyebrow)の文言と色。色で操作の重さを表す */
@@ -49,6 +50,8 @@ export function ConfirmDialog({
   onCancel,
   onConfirm,
 }: ConfirmDialogProps) {
+  const titleId = useId();
+  const cancelButtonRef = useDialogAccessibility(onCancel, busy);
   useEffect(() => {
     playUiSound("confirmation");
   }, []);
@@ -56,6 +59,9 @@ export function ConfirmDialog({
   return createPortal(
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm animate-fade-in dark:bg-[#070b14]/80">
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className={`cyber-corners w-full max-w-sm rounded-xl border bg-white p-6 text-center shadow-2xl animate-scale-in dark:bg-slate-900 ${borderClass}`}
       >
         <p
@@ -70,7 +76,9 @@ export function ConfirmDialog({
             {icon}
           </div>
         )}
-        <p className="mt-4 text-base font-semibold text-slate-900 dark:text-white">{title}</p>
+        <p id={titleId} className="mt-4 text-base font-semibold text-slate-900 dark:text-white">
+          {title}
+        </p>
         {message && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{message}</p>}
 
         {error && (
@@ -79,6 +87,7 @@ export function ConfirmDialog({
 
         <div className="mt-5 flex gap-3">
           <button
+            ref={cancelButtonRef}
             type="button"
             onClick={onCancel}
             disabled={busy}

@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { MemberListPanel } from "@/widgets/member-list-panel/MemberListPanel";
 import { FaceAuthPanel } from "@/widgets/face-auth-panel/FaceAuthPanel";
 import { AttendanceActionSheet } from "@/widgets/attendance-action-sheet/AttendanceActionSheet";
-import { restartComputer } from "@/widgets/system-control-panel/api";
+import { restartComputer } from "@/shared/lib/systemCommands";
 import { BootCheckScreen } from "@/widgets/boot-check-screen/BootCheckScreen";
-import { SettingsPage } from "@/widgets/settings-page/SettingsPage";
 import { StatusFooter } from "@/widgets/status-footer/StatusFooter";
 import { AppProviders } from "./providers/AppProviders";
 import { useFaceAuth } from "@/features/face-auth/FaceAuthContext";
@@ -14,10 +13,16 @@ import { useMembers } from "@/entities/member/MemberContext";
 import { isAnimatedPattern, PATTERN_CLASS, useSettings } from "@/shared/hooks/useSettings";
 import { useUiSoundEffects } from "@/shared/hooks/useUiSoundEffects";
 import { applyHardwareVolume } from "@/shared/lib/hardwareVolume";
+import type { AuthMode } from "@/features/face-auth/model";
 import "./App.css";
 
-// 顔認証パネルのモード。register 中は左パネルを顔登録フォームへ差し替える。
-export type AuthMode = "recognize" | "register";
+// 通常運用では開かない管理画面を初期バンドルから分離し、キオスク起動時の
+// JavaScript解析量を抑える。
+const SettingsPage = lazy(() =>
+  import("@/widgets/settings-page/SettingsPage").then((module) => ({
+    default: module.SettingsPage,
+  })),
+);
 
 export default function App() {
   const [hasBooted, setHasBooted] = useState(false);
@@ -49,6 +54,7 @@ function MainScreen() {
   const { settings, isLoading: isSettingsLoading } = useSettings();
   const { refetch } = useMembers();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isScreenDimmed, setIsScreenDimmed] = useState(false);
   // 顔認証パネルのモード。App レベルで持ち、登録中は左パネルを登録フォームに
   // 差し替えつつ右パネルのカメラ検出可視化を継続させる。
   const [authMode, setAuthMode] = useState<AuthMode>("recognize");
@@ -69,9 +75,14 @@ function MainScreen() {
       const fireKey = `${now.toDateString()}_${current}`;
       if (lastFiredKeyRef.current === fireKey) return;
       lastFiredKeyRef.current = fireKey;
-      restartComputer();
+      void restartComputer().catch((err) => {
+        console.error("[reboot-schedule] 自動再起動に失敗しました:", err);
+        if (lastFiredKeyRef.current === fireKey) lastFiredKeyRef.current = null;
+      });
     }
 
+    // 対象分の途中で画面がマウントされた場合も、その日の実行を取り逃さない。
+    checkRebootSchedule();
     const timer = window.setInterval(checkRebootSchedule, 60_000);
     return () => window.clearInterval(timer);
   }, [settings.rebootSchedule]);
@@ -109,6 +120,7 @@ function MainScreen() {
           onOpenSettings={() => setIsSettingsOpen(true)}
           mode={authMode}
           setMode={setAuthMode}
+          isInteractive={!isSettingsOpen && !isScreenDimmed}
         />
       </div>
 
@@ -118,11 +130,21 @@ function MainScreen() {
         </p>
       )}
 
-      <AttendanceActionSheet />
+      <AttendanceActionSheet isInteractive={!isSettingsOpen && !isScreenDimmed} />
 
-      {isSettingsOpen && <SettingsPage onClose={() => setIsSettingsOpen(false)} />}
+      {isSettingsOpen && (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950 text-sm text-slate-300">
+              設定を読み込んでいます…
+            </div>
+          }
+        >
+          <SettingsPage onClose={() => setIsSettingsOpen(false)} />
+        </Suspense>
+      )}
 
-      <ScreenDimmer />
+      <ScreenDimmer onDimmedChange={setIsScreenDimmed} />
     </main>
   );
 }

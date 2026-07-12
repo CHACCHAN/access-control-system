@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { AttendanceStatus, Member } from "@/entities/member/api";
+import type { AttendanceStatus, Member } from "@/entities/member/model";
 import type { GestureKind } from "@/shared/lib/visionApi";
 import { playUiSound } from "@/shared/lib/uiSound";
 import { GestureGuide } from "@/features/gesture/GestureGuide";
@@ -13,6 +13,7 @@ interface FaceMatchConfirmCardProps {
   detectedGesture: GestureKind | null;
   /** ジェスチャーで直接記録が完了したときのステータス(完了表示に切り替える) */
   completedAction: AttendanceStatus | null;
+  busy?: boolean;
 }
 
 /**
@@ -27,6 +28,7 @@ export function FaceMatchConfirmCard({
   onReject,
   detectedGesture,
   completedAction,
+  busy = false,
 }: FaceMatchConfirmCardProps) {
   // 確認ダイアログの表示時に確認音を鳴らす(対象メンバーが変わったときも)
   useEffect(() => {
@@ -37,7 +39,7 @@ export function FaceMatchConfirmCard({
     <div className="absolute inset-x-0 bottom-0 flex justify-center p-6">
       <div className="cyber-corners w-full max-w-sm animate-slide-up rounded-xl border border-slate-200 bg-white/95 p-6 text-center shadow-2xl backdrop-blur dark:border-cyan-400/25 dark:bg-slate-900/95">
         {completedAction ? (
-          <div className="flex flex-col items-center gap-3 py-4 animate-scale-in">
+          <div role="status" className="flex flex-col items-center gap-3 py-4 animate-scale-in">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
               <CheckIcon className="h-6 w-6" />
             </div>
@@ -59,12 +61,14 @@ export function FaceMatchConfirmCard({
             <div className="mt-4 flex gap-3">
               <button
                 onClick={onReject}
+                disabled={busy}
                 className="flex-1 rounded-lg border border-slate-200 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/5"
               >
                 ちがう
               </button>
               <button
                 onClick={onConfirm}
+                disabled={busy}
                 className="flex-1 rounded-lg bg-cyan-500 py-2.5 text-sm font-semibold text-slate-950 shadow-glow transition hover:bg-cyan-400"
               >
                 はい

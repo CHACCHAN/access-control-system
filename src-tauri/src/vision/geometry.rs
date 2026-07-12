@@ -1,6 +1,46 @@
 // 推論パイプライン共通の画像・幾何ユーティリティ。
 // OpenCV 相当の処理(warpAffine / getRotationMatrix2D / NMS / 相似変換推定)を
 // 依存を増やさず最小限で実装している。座標系は全て「x右・y下」のピクセル座標。
+use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
+
+#[derive(Clone)]
+pub enum RgbData {
+    Owned(Vec<u8>),
+    Shared(Arc<[u8]>),
+}
+
+impl From<Vec<u8>> for RgbData {
+    fn from(value: Vec<u8>) -> Self {
+        Self::Owned(value)
+    }
+}
+
+impl From<Arc<[u8]>> for RgbData {
+    fn from(value: Arc<[u8]>) -> Self {
+        Self::Shared(value)
+    }
+}
+
+impl Deref for RgbData {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Owned(data) => data,
+            Self::Shared(data) => data,
+        }
+    }
+}
+
+impl DerefMut for RgbData {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::Owned(data) => data,
+            Self::Shared(data) => Arc::make_mut(data),
+        }
+    }
+}
 
 /// 生RGBバッファ(len = width * height * 3)。カメラキャプチャの生フレームと
 /// 推論用の中間画像はすべてこの形式で受け渡す。
@@ -8,7 +48,7 @@
 pub struct RgbBuf {
     pub width: usize,
     pub height: usize,
-    pub data: Vec<u8>,
+    pub data: RgbData,
 }
 
 impl RgbBuf {
@@ -16,7 +56,7 @@ impl RgbBuf {
         Self {
             width,
             height,
-            data: vec![0; width * height * 3],
+            data: vec![0; width * height * 3].into(),
         }
     }
 
@@ -66,7 +106,11 @@ pub struct Canvas<'a> {
 
 impl<'a> Canvas<'a> {
     pub fn new(data: &'a mut [u8], width: usize, height: usize) -> Self {
-        Self { data, width, height }
+        Self {
+            data,
+            width,
+            height,
+        }
     }
 
     #[inline]
@@ -76,9 +120,9 @@ impl<'a> Canvas<'a> {
         }
         let i = (y as usize * self.width + x as usize) * 3;
         let a = alpha.clamp(0.0, 1.0);
-        for c in 0..3 {
+        for (c, &foreground) in color.iter().enumerate() {
             let bg = self.data[i + c] as f32;
-            self.data[i + c] = (bg * (1.0 - a) + color[c] as f32 * a).round() as u8;
+            self.data[i + c] = (bg * (1.0 - a) + foreground as f32 * a).round() as u8;
         }
     }
 
@@ -115,7 +159,15 @@ impl<'a> Canvas<'a> {
     }
 
     /// 矩形の外枠([x1,y1]-[x2,y2])を太さ thickness で描く。
-    pub fn draw_rect(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, thickness: f32, color: [u8; 3]) {
+    pub fn draw_rect(
+        &mut self,
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        thickness: f32,
+        color: [u8; 3],
+    ) {
         self.draw_line([x1, y1], [x2, y1], thickness, color);
         self.draw_line([x2, y1], [x2, y2], thickness, color);
         self.draw_line([x2, y2], [x1, y2], thickness, color);

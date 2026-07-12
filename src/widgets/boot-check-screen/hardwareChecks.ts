@@ -37,57 +37,64 @@ export async function testCameraCapture(): Promise<BootCheckResult> {
 async function testCameraCaptureNative(): Promise<BootCheckResult> {
   let unlistenFrame: UnlistenFn | undefined;
   let unlistenError: UnlistenFn | undefined;
+  let timeoutId: number | undefined;
 
   try {
-    const { width, height } = await new Promise<{ width: number; height: number }>(
-      (resolve, reject) => {
-        // 露出が安定するまでの最初の数フレームは真っ黒なことがあるため、黒フレームは
-        // 即失敗にせず次のフレームを待つ。タイムアウトで初めて失敗と判定し、その際は
-        // 直近の失敗理由(真っ黒 等)を添えて返す。
-        let lastFailureReason = "映像フレームを受信できませんでした";
-        let settled = false;
+    let resolveFrame!: (value: { width: number; height: number }) => void;
+    let rejectFrame!: (reason: unknown) => void;
+    const readyFrame = new Promise<{ width: number; height: number }>((resolve, reject) => {
+      resolveFrame = resolve;
+      rejectFrame = reject;
+    });
+    let frameSettled = false;
+    let frameDecoding = false;
+    let lastFailureReason = "映像フレームを受信できませんでした";
+    unlistenFrame = await listen<{ imageData: string }>("camera-frame", (event) => {
+      if (frameSettled || frameDecoding) return;
+      frameDecoding = true;
+      void decodeAndCheckFrame(event.payload.imageData)
+        .then((value) => {
+          if (frameSettled) return;
+          frameSettled = true;
+          window.clearTimeout(timeoutId);
+          resolveFrame(value);
+        })
+        .catch((err) => {
+          lastFailureReason = err instanceof Error ? err.message : String(err);
+        })
+        .finally(() => {
+          frameDecoding = false;
+        });
+    });
+    unlistenError = await listen<string>("camera-error", (event) => {
+      if (frameSettled) return;
+      frameSettled = true;
+      window.clearTimeout(timeoutId);
+      rejectFrame(new Error(event.payload));
+    });
 
-        const timer = window.setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          reject(new Error(lastFailureReason));
-        }, CAMERA_FRAME_TIMEOUT_MS);
-
-        const finish = (value: { width: number; height: number }) => {
-          if (settled) return;
-          settled = true;
-          window.clearTimeout(timer);
-          resolve(value);
-        };
-
-        listen<{ imageData: string }>("camera-frame", (event) => {
-          decodeAndCheckFrame(event.payload.imageData).then(finish, (err) => {
-            lastFailureReason = err instanceof Error ? err.message : String(err);
-          });
-        }).then((unlisten) => {
-          unlistenFrame = unlisten;
-        }, reject);
-
-        listen<string>("camera-error", (event) => {
-          if (settled) return;
-          settled = true;
-          window.clearTimeout(timer);
-          reject(new Error(event.payload));
-        }).then((unlisten) => {
-          unlistenError = unlisten;
-        }, reject);
-
-        invoke("start_camera_capture").catch(reject);
-      },
-    );
+    // イベント購読完了後にcaptureを開始し、開始エラーとフレーム待機を同時に監視する。
+    if (!frameSettled) {
+      timeoutId = window.setTimeout(() => {
+        if (frameSettled) return;
+        frameSettled = true;
+        rejectFrame(new Error(lastFailureReason));
+      }, CAMERA_FRAME_TIMEOUT_MS);
+    }
+    const [, { width, height }] = await Promise.all([
+      invoke<void>("start_camera_capture"),
+      readyFrame,
+    ]);
 
     return { ok: true, detail: `${width}x${height} の映像を受信` };
   } catch (err) {
     return { ok: false, detail: err instanceof Error ? err.message : String(err) };
   } finally {
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     unlistenFrame?.();
     unlistenError?.();
-    invoke("stop_camera_capture").catch(() => {});
+    // カメラ解放完了後にだけ診断を終了し、本画面の再startとの競合を防ぐ。
+    await invoke("stop_camera_capture").catch(() => {});
   }
 }
 

@@ -14,7 +14,11 @@
 // CORS 制約を受けないため、この中継は使わない(起動はするが未使用)。
 
 // httpClient.ts の DEV_PROXY_PORT と一致させること
-const PROXY_PORT = Number(process.env.DEV_PROXY_PORT ?? 8787);
+const configuredProxyPort = Number(process.env.DEV_PROXY_PORT ?? 8787);
+if (!Number.isInteger(configuredProxyPort) || configuredProxyPort <= 0 || configuredProxyPort > 65_535) {
+  throw new Error(`DEV_PROXY_PORT が不正です: ${process.env.DEV_PROXY_PORT}`);
+}
+const PROXY_PORT = configuredProxyPort;
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -24,6 +28,8 @@ const CORS_HEADERS: Record<string, string> = {
 };
 
 Bun.serve({
+  // 任意URLへ転送できる開発専用機能なので、LANへ公開しない。
+  hostname: "127.0.0.1",
   port: PROXY_PORT,
   async fetch(req) {
     // CORS プリフライト
@@ -35,6 +41,15 @@ Bun.serve({
     if (!target) {
       return new Response("missing ?url=", { status: 400, headers: CORS_HEADERS });
     }
+    let targetUrl: URL;
+    try {
+      targetUrl = new URL(target);
+    } catch {
+      return new Response("invalid target URL", { status: 400, headers: CORS_HEADERS });
+    }
+    if (targetUrl.protocol !== "http:" && targetUrl.protocol !== "https:") {
+      return new Response("unsupported target protocol", { status: 400, headers: CORS_HEADERS });
+    }
 
     // ブラウザ→中継サーバー間で付与されるヘッダのうち、転送すると不都合な
     // ものだけ除去して残りは引き継ぐ(Authorization / Content-Type などは維持)。
@@ -44,7 +59,7 @@ Bun.serve({
     }
 
     try {
-      const upstream = await fetch(target, {
+      const upstream = await fetch(targetUrl, {
         method: req.method,
         headers,
         body:
@@ -82,6 +97,8 @@ const vite = Bun.spawn(["bunx", "vite", "--host"], {
   stdin: "inherit",
   stdout: "inherit",
   stderr: "inherit",
+  // クライアント側も同じポートを参照できるようVite公開変数へ引き継ぐ。
+  env: { ...process.env, VITE_DEV_PROXY_PORT: String(PROXY_PORT) },
 });
 
 const shutdown = () => {

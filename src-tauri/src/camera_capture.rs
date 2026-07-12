@@ -44,7 +44,7 @@ pub struct LatestFrame {
     pub width: u32,
     pub height: u32,
     /// RGB24 (len = width * height * 3)
-    pub rgb: Vec<u8>,
+    pub rgb: Arc<[u8]>,
     pub captured_at: Instant,
 }
 
@@ -89,7 +89,12 @@ pub fn start_camera_capture(
     let thread_shared_frame = shared_frame.inner().clone();
     let thread_overlay = overlay_state.inner().clone();
     let join_handle = std::thread::spawn(move || {
-        run_capture_loop(&app, &thread_stop_flag, &thread_shared_frame, &thread_overlay)
+        run_capture_loop(
+            &app,
+            &thread_stop_flag,
+            &thread_shared_frame,
+            &thread_overlay,
+        )
     });
 
     *guard = Some(CaptureHandle {
@@ -101,19 +106,20 @@ pub fn start_camera_capture(
 
 #[tauri::command]
 pub fn stop_camera_capture(state: State<CameraCaptureState>) -> Result<(), String> {
-    let handle = {
-        let mut guard = state
-            .0
-            .lock()
-            .map_err(|_| "内部状態のロックに失敗しました".to_string())?;
-        guard.take()
-    };
-
-    if let Some(handle) = handle {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "内部状態のロックに失敗しました".to_string())?;
+    if let Some(handle) = guard.take() {
         handle.stop_flag.store(true, Ordering::SeqCst);
         // 次回起動時に「デバイス使用中」エラーにならないよう、カメラが
         // 実際に解放されるまで(スレッド終了まで)待ってから戻る。
-        let _ = handle.join_handle.join();
+        // join 中も状態ロックを保持し、並行して呼ばれた start が旧カメラの
+        // 解放前に新しいキャプチャスレッドを起動しないようにする。
+        handle
+            .join_handle
+            .join()
+            .map_err(|_| "カメラキャプチャスレッドが異常終了しました".to_string())?;
     }
     Ok(())
 }
@@ -161,11 +167,7 @@ fn probe_current_format(index: u32) -> Option<ProbedFormat> {
         .ok()
         .and_then(|p| {
             // interval は 1フレームあたりの時間(例: 1/30 秒 → 30fps)
-            if p.interval.numerator > 0 {
-                Some(p.interval.denominator / p.interval.numerator)
-            } else {
-                None
-            }
+            p.interval.denominator.checked_div(p.interval.numerator)
         })
         .filter(|fps| *fps > 0)
         .unwrap_or(30);
@@ -225,13 +227,12 @@ fn open_first_available_camera() -> Result<Camera, String> {
             );
             if let Some(frame_format) = fourcc_to_frame_format(&p.fourcc) {
                 candidates.push((
-                    format!("現在の出力({} {}x{}@{})", p.fourcc, p.width, p.height, p.fps),
+                    format!(
+                        "現在の出力({} {}x{}@{})",
+                        p.fourcc, p.width, p.height, p.fps
+                    ),
                     RequestedFormat::new::<RgbFormat>(RequestedFormatType::Exact(
-                        CameraFormat::new(
-                            Resolution::new(p.width, p.height),
-                            frame_format,
-                            p.fps,
-                        ),
+                        CameraFormat::new(Resolution::new(p.width, p.height), frame_format, p.fps),
                     )),
                 ));
             }
@@ -239,14 +240,23 @@ fn open_first_available_camera() -> Result<Camera, String> {
 
         for (label, requested) in candidates {
             match Camera::new(info.index().clone(), requested) {
-                Ok(camera) => {
-                    eprintln!(
-                        "[camera-capture] {} を {label} で使用します(実際: {})",
-                        info.human_name(),
-                        camera.camera_format(),
-                    );
-                    return Ok(camera);
-                }
+                Ok(mut camera) => match camera.open_stream() {
+                    Ok(()) => {
+                        eprintln!(
+                            "[camera-capture] {} を {label} で使用します(実際: {})",
+                            info.human_name(),
+                            camera.camera_format(),
+                        );
+                        return Ok(camera);
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[camera-capture] {} ({label}) のストリームを開始できません: {e}",
+                            info.human_name()
+                        );
+                        last_err = format!("{} ({label}, stream): {e}", info.human_name());
+                    }
+                },
                 Err(e) => {
                     eprintln!(
                         "[camera-capture] {} ({label}) を開けません: {e}",
@@ -282,10 +292,10 @@ fn run_capture_loop(
 ) {
     // 設定はキャプチャ開始時に一度だけ読む(設定保存時は端末ごと再起動する運用のため)
     let perf = crate::settings::load_perf(app);
-    let frame_interval = Duration::from_millis(perf.camera_frame_interval_ms);
+    let emit_interval = Duration::from_millis(perf.camera_frame_interval_ms);
     let jpeg_quality = perf.camera_jpeg_quality;
     eprintln!(
-        "[camera-capture] フレーム間隔 {}ms / JPEG品質 {}",
+        "[camera-capture] 表示フレーム間隔 {}ms / JPEG品質 {}",
         perf.camera_frame_interval_ms, jpeg_quality
     );
 
@@ -297,11 +307,6 @@ fn run_capture_loop(
         }
     };
 
-    if let Err(e) = camera.open_stream() {
-        let _ = app.emit("camera-error", format!("カメラストリームを開始できませんでした: {e}"));
-        return;
-    }
-
     // ウォームアップ:最初の数フレームを捨てる(この間のエラーは無視する)。
     for _ in 0..WARMUP_FRAMES {
         if stop_flag.load(Ordering::SeqCst) {
@@ -310,66 +315,117 @@ fn run_capture_loop(
         let _ = camera.frame();
     }
 
-    let mut consecutive_errors: u32 = 0;
+    let mut consecutive_capture_errors: u32 = 0;
+    let mut consecutive_encode_errors: u32 = 0;
+    let mut last_frame_emit: Option<Instant> = None;
     while !stop_flag.load(Ordering::SeqCst) {
-        let loop_start = Instant::now();
+        // カメラからの取得と SharedFrame の更新はデバイスのフレームペースで
+        // 継続する。表示用の RGB コピー・JPEG 化・emit だけを設定間隔で間引き、
+        // 表示 FPS が推論に使う最新フレームの鮮度に影響しないようにする。
+        let should_emit = last_frame_emit
+            .map(|last| last.elapsed() >= emit_interval)
+            .unwrap_or(true);
 
-        match capture_and_encode_frame(&mut camera, shared_frame, overlay, jpeg_quality) {
-            Ok(image_data) => {
-                consecutive_errors = 0;
-                let _ = app.emit("camera-frame", CameraFramePayload { image_data });
+        match capture_latest_frame(&mut camera, shared_frame, should_emit) {
+            Ok(display_frame) => {
+                consecutive_capture_errors = 0;
+
+                let Some(display_frame) = display_frame else {
+                    continue;
+                };
+                // エンコード失敗時に毎カメラフレームで再試行して CPU を
+                // 使い切らないよう、表示フレームとして選んだ時点で間隔を更新する。
+                last_frame_emit = Some(Instant::now());
+                match encode_display_frame(display_frame, overlay, jpeg_quality) {
+                    Ok(image_data) => {
+                        consecutive_encode_errors = 0;
+                        let _ = app.emit("camera-frame", CameraFramePayload { image_data });
+                    }
+                    Err(e) => {
+                        consecutive_encode_errors += 1;
+                        if consecutive_encode_errors >= MAX_CONSECUTIVE_ERRORS {
+                            let _ = app.emit(
+                                "camera-error",
+                                format!(
+                                    "表示フレームのエンコードに連続{consecutive_encode_errors}回失敗しました: {e}"
+                                ),
+                            );
+                            break;
+                        }
+                    }
+                }
             }
             Err(e) => {
-                consecutive_errors += 1;
+                consecutive_capture_errors += 1;
                 // 連続で規定回数失敗した場合のみ、復帰不能とみなして通知・終了する。
                 // それ未満の単発エラーは次のフレームで回復する見込みとして握りつぶす。
-                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                if consecutive_capture_errors >= MAX_CONSECUTIVE_ERRORS {
                     let _ = app.emit(
                         "camera-error",
-                        format!("フレームの取得に連続{consecutive_errors}回失敗しました: {e}"),
+                        format!(
+                            "フレームの取得に連続{consecutive_capture_errors}回失敗しました: {e}"
+                        ),
                     );
                     break;
                 }
             }
         }
-
-        let elapsed = loop_start.elapsed();
-        if elapsed < frame_interval {
-            std::thread::sleep(frame_interval - elapsed);
-        }
     }
 }
 
-fn capture_and_encode_frame(
+struct DisplayFrame {
+    width: u32,
+    height: u32,
+    rgb: Vec<u8>,
+}
+
+/// カメラから1フレーム取得・デコードし、推論用の最新フレームを更新する。
+/// `copy_for_display` のときだけ表示用 RGB を複製し、JPEG エンコードは呼び出し側で行う。
+fn capture_latest_frame(
     camera: &mut Camera,
     shared_frame: &SharedFrame,
+    copy_for_display: bool,
+) -> Result<Option<DisplayFrame>, String> {
+    let frame = camera.frame().map_err(|e| e.to_string())?;
+    let decoded = frame
+        .decode_image::<RgbFormat>()
+        .map_err(|e| e.to_string())?;
+    let width = decoded.width();
+    let height = decoded.height();
+    let rgb = decoded.into_raw();
+    let display_frame = copy_for_display.then(|| DisplayFrame {
+        width,
+        height,
+        rgb: rgb.clone(),
+    });
+
+    // 推論(顔認証・ジェスチャー認識)用には「オーバーレイを描く前」のクリーンな
+    // フレームを共有する。オーバーレイ入りのフレームで推論すると精度が落ちるため。
+    let mut guard = shared_frame
+        .0
+        .lock()
+        .map_err(|_| "フレーム共有状態のロックに失敗しました".to_string())?;
+    *guard = Some(LatestFrame {
+        width,
+        height,
+        rgb: Arc::from(rgb),
+        captured_at: Instant::now(),
+    });
+    Ok(display_frame)
+}
+
+fn encode_display_frame(
+    mut frame: DisplayFrame,
     overlay: &OverlayState,
     jpeg_quality: u8,
 ) -> Result<String, String> {
     use base64::Engine;
 
-    let frame = camera.frame().map_err(|e| e.to_string())?;
-    let decoded = frame.decode_image::<RgbFormat>().map_err(|e| e.to_string())?;
-    let width = decoded.width();
-    let height = decoded.height();
-    let mut rgb = decoded.into_raw();
-
-    // 推論(顔認証・ジェスチャー認識)用には「オーバーレイを描く前」のクリーンな
-    // フレームを共有する。オーバーレイ入りのフレームで推論すると精度が落ちるため。
-    if let Ok(mut guard) = shared_frame.0.lock() {
-        *guard = Some(LatestFrame {
-            width,
-            height,
-            rgb: rgb.clone(),
-            captured_at: Instant::now(),
-        });
-    }
-
     // フロント表示用フレームには検出結果(顔枠・ランドマーク・手の骨格)を
     // Rust 側で直接焼き込む。フロントは焼き込み済みのフレームを表示するだけ。
-    overlay.render(&mut rgb, width as usize, height as usize);
+    overlay.render(&mut frame.rgb, frame.width as usize, frame.height as usize);
 
-    let img = image::RgbImage::from_raw(width, height, rgb)
+    let img = image::RgbImage::from_raw(frame.width, frame.height, frame.rgb)
         .ok_or("フレームバッファのサイズが不正です")?;
     let mut jpeg_bytes = Vec::new();
     JpegEncoder::new_with_quality(&mut jpeg_bytes, jpeg_quality)

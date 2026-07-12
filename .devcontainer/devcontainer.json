@@ -6,9 +6,11 @@
   },
   "forwardPorts": [1420, 5173, 8080, 8787],
   "workspaceFolder": "/workspace",
-  "workspaceMount": "source=/home/dev/workspace/cit/access-control-system,target=/workspace,type=bind,consistency=cached",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
   "mounts": [
     "source=${localEnv:HOME}/.gitlab-credentials-devcontainer,target=/root/.git-credentials,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.claude,target=/root/.claude,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.codex,target=/root/.codex,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.gitconfig-devcontainer,target=/root/.gitconfig,type=bind,consistency=cached"
   ],
   "customizations": {
@@ -38,7 +40,8 @@
         "usernamehw.errorlens",
         "editorconfig.editorconfig",
         "yzhang.markdown-all-in-one",
-        "anthropic.claude-code"
+        "anthropic.claude-code",
+        "openai.chatgpt"
       ],
       "settings": {
         "editor.formatOnSave": true,
