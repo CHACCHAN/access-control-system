@@ -30,6 +30,9 @@ const WARMUP_FRAMES: u32 = 8;
 // 一過性の v4l2 エラーで無人キオスクが復帰不能にならないよう、連続で
 // この回数失敗するまではキャプチャを継続する(単発の失敗は握りつぶす)。
 const MAX_CONSECUTIVE_ERRORS: u32 = 15;
+// キャプチャ中もこの間隔でパフォーマンス設定を読み直し、送信間隔・JPEG品質の
+// 変更をカメラを掴み直さずに反映する(設定保存→端末再起動を待たずに効くようにする)。
+const PERF_RELOAD_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -290,10 +293,13 @@ fn run_capture_loop(
     shared_frame: &SharedFrame,
     overlay: &OverlayState,
 ) {
-    // 設定はキャプチャ開始時に一度だけ読む(設定保存時は端末ごと再起動する運用のため)
+    // 設定はキャプチャ開始時に読み、以降は PERF_RELOAD_INTERVAL 間隔で読み直す。
+    // これにより送信間隔(fps)・JPEG品質の変更が、カメラを掴み直さずに(端末再起動を
+    // 待たずに)反映される。照合パラメータは推論側が毎回読むので従来どおり即時。
     let perf = crate::settings::load_perf(app);
-    let emit_interval = Duration::from_millis(perf.camera_frame_interval_ms);
-    let jpeg_quality = perf.camera_jpeg_quality;
+    let mut emit_interval = Duration::from_millis(perf.camera_frame_interval_ms);
+    let mut jpeg_quality = perf.camera_jpeg_quality;
+    let mut last_perf_reload = Instant::now();
     eprintln!(
         "[camera-capture] 表示フレーム間隔 {}ms / JPEG品質 {}",
         perf.camera_frame_interval_ms, jpeg_quality
@@ -319,6 +325,22 @@ fn run_capture_loop(
     let mut consecutive_encode_errors: u32 = 0;
     let mut last_frame_emit: Option<Instant> = None;
     while !stop_flag.load(Ordering::SeqCst) {
+        // 設定変更(送信間隔・JPEG品質)を掴み直しなしで反映する。頻繁な store 読み
+        // 出しを避けるため一定間隔でのみ読み直す。
+        if last_perf_reload.elapsed() >= PERF_RELOAD_INTERVAL {
+            last_perf_reload = Instant::now();
+            let perf = crate::settings::load_perf(app);
+            let new_interval = Duration::from_millis(perf.camera_frame_interval_ms);
+            if new_interval != emit_interval || perf.camera_jpeg_quality != jpeg_quality {
+                eprintln!(
+                    "[camera-capture] 設定を再読込: 表示フレーム間隔 {}ms / JPEG品質 {}",
+                    perf.camera_frame_interval_ms, perf.camera_jpeg_quality
+                );
+                emit_interval = new_interval;
+                jpeg_quality = perf.camera_jpeg_quality;
+            }
+        }
+
         // カメラからの取得と SharedFrame の更新はデバイスのフレームペースで
         // 継続する。表示用の RGB コピー・JPEG 化・emit だけを設定間隔で間引き、
         // 表示 FPS が推論に使う最新フレームの鮮度に影響しないようにする。

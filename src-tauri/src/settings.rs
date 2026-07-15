@@ -32,7 +32,7 @@ impl Default for PerfSettings {
             camera_jpeg_quality: 75,
             match_threshold: 0.5,
             match_margin: 0.05,
-            min_face_width_ratio: 0.15,
+            min_face_width_ratio: 0.22,
         }
     }
 }

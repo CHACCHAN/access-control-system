@@ -4,8 +4,9 @@ import { recognizeFace } from "@/shared/lib/visionApi";
 import { useSettings } from "@/shared/hooks/useSettings";
 import type { EnrolledFace } from "./FaceAuthContext";
 
-// 顔がフレーム幅に対してこの比率未満なら「もう少し近づいてください」を出す
-const CLOSE_THRESHOLD = 0.32;
+// 「もう少し近づいてください」を出す顔サイズ比率のフォールバック(設定が壊れていた場合のみ)。
+// 実際のしきい値は設定(performance.minFaceWidthRatio)から取る。
+const CLOSE_THRESHOLD_FALLBACK = 0.22;
 // 確認カード表示中にこの回数連続で顔が検出されなければ、離れたとみなして自動的に閉じる
 const MISS_STREAK_TO_DISMISS = 2;
 
@@ -53,6 +54,13 @@ export function useFaceRecognitionLoop({
   const detectionIntervalMs = Math.max(200, settings.performance.recognitionIntervalMs || 1000);
   // 同一人物がこの回数連続で認識されたときだけ確認カードを出す(誤爆防止)
   const stableCount = Math.max(1, Math.round(settings.performance.recognitionStableCount) || 1);
+  // 顔がフレーム幅に対してこの比率未満なら「もう少し近づいてください」を出す。
+  // 設定(照合する最小顔サイズ比率)で調整できる。小さくするほど遠くても認証を試みる。
+  const closeThreshold =
+    Number.isFinite(settings.performance.minFaceWidthRatio) &&
+    settings.performance.minFaceWidthRatio > 0
+      ? settings.performance.minFaceWidthRatio
+      : CLOSE_THRESHOLD_FALLBACK;
 
   const [hint, setHint] = useState<FaceScanHint>("scanning");
   const [isInferring, setIsInferring] = useState(false);
@@ -96,7 +104,7 @@ export function useFaceRecognitionLoop({
           includeLandmarks: matchedMember === null,
           // この比率未満の認識結果は下で「近づいて」と破棄するため、Rust側でも
           // ランドマーク・embedding処理へ進ませない。
-          minMatchFaceWidthRatio: CLOSE_THRESHOLD,
+          minMatchFaceWidthRatio: closeThreshold,
         });
         // active/mode/メンバー一覧が変わった後に届いた旧推論結果をUIへ反映しない。
         if (cancelled) return;
@@ -144,7 +152,7 @@ export function useFaceRecognitionLoop({
         }
 
         const closeness = result.bbox[2] / result.frameWidth;
-        if (closeness < CLOSE_THRESHOLD) {
+        if (closeness < closeThreshold) {
           matchStreakRef.current = null;
           setHint("come-closer");
           return;
@@ -195,7 +203,16 @@ export function useFaceRecognitionLoop({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [active, enableMatch, matchedMember, enrolledFaces, members, detectionIntervalMs, stableCount]);
+  }, [
+    active,
+    enableMatch,
+    matchedMember,
+    enrolledFaces,
+    members,
+    detectionIntervalMs,
+    stableCount,
+    closeThreshold,
+  ]);
 
   function dismissMatch() {
     missCountRef.current = 0;

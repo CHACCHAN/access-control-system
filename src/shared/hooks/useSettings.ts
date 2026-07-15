@@ -82,7 +82,7 @@ export const DEFAULT_PERFORMANCE: PerformanceSettings = {
   cameraJpegQuality: 75,
   matchThreshold: 0.5,
   matchMargin: 0.05,
-  minFaceWidthRatio: 0.15,
+  minFaceWidthRatio: 0.22,
 };
 
 // デザインのカスタマイズ。アクセントカラーは Tailwind の cyan 系 CSS 変数を

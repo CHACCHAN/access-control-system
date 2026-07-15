@@ -2,11 +2,11 @@
   "name": "face-gesture-wasm-dev",
   "build": {
     "dockerfile": "Dockerfile",
-    "context": "."
+    "context": ".."
   },
   "forwardPorts": [1420, 5173, 8080, 8787],
-  "workspaceFolder": "/workspace",
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "workspaceFolder": "/${localWorkspaceFolderBasename}",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/${localWorkspaceFolderBasename},type=bind,consistency=cached",
   "mounts": [
     "source=${localEnv:HOME}/.gitlab-credentials-devcontainer,target=/root/.git-credentials,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.claude,target=/root/.claude,type=bind,consistency=cached",
@@ -40,8 +40,7 @@
         "usernamehw.errorlens",
         "editorconfig.editorconfig",
         "yzhang.markdown-all-in-one",
-        "anthropic.claude-code",
-        "openai.chatgpt"
+        "anthropic.claude-code"
       ],
       "settings": {
         "editor.formatOnSave": true,

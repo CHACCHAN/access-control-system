@@ -56,14 +56,16 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 | performance.recognitionStableCount | 1 | 即時 | 顔認証の連続一致回数(確認カード表示まで) |
 | performance.gesturePollIntervalMs | 700 | 即時 | ジェスチャー認識の間隔(ms) |
 | performance.gestureStableCount | 2 | 即時 | ジェスチャーの連続一致回数 |
-| performance.cameraFrameIntervalMs | 100 | 再起動後 | カメラ映像の送信間隔(ms)。100ms=10fps |
-| performance.cameraJpegQuality | 75 | 再起動後 | カメラ映像の JPEG 品質(10-100) |
-| performance.matchThreshold | 0.5 | 再起動後* | 照合閾値(コサイン類似度) |
-| performance.matchMargin | 0.05 | 再起動後* | 1位2位の差がこれ未満なら該当者なし |
-| performance.minFaceWidthRatio | 0.15 | 再起動後* | 照合する最小顔サイズ比率 |
+| performance.cameraFrameIntervalMs | 100 | 数秒で反映 | カメラ映像の送信間隔(ms)。100ms=10fps |
+| performance.cameraJpegQuality | 75 | 数秒で反映 | カメラ映像の JPEG 品質(10-100) |
+| performance.matchThreshold | 0.5 | 即時 | 照合閾値(コサイン類似度) |
+| performance.matchMargin | 0.05 | 即時 | 1位2位の差がこれ未満なら該当者なし |
+| performance.minFaceWidthRatio | 0.22 | 即時 | 照合する最小顔サイズ比率(近接判定)。この比率未満は「近づいてください」を表示。下げるほど遠くても認証を試みる |
 
-\* Rust 側は推論のたびに設定を読むため技術的には即時反映されるが、保存操作自体が
-実機では再起動を伴うため、運用上は「保存(=再起動)後に反映」となる。
+カメラの送信間隔・JPEG品質は、キャプチャスレッドが 2 秒間隔で設定を読み直すため、
+端末を再起動しなくても数秒で反映される(カメラは掴み直さないので映像は途切れない)。
+照合パラメータ(match* / minFaceWidthRatio)は Rust 側が推論のたびに読むため即時反映される。
+いずれも設定「保存」時に実機では再起動が走るが、反映自体は再起動を待たない。
 
 ### API 接続(CONNECTION)
 
