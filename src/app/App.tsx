@@ -58,7 +58,12 @@ function MainScreen() {
   // 顔認証パネルのモード。App レベルで持ち、登録中は左パネルを登録フォームに
   // 差し替えつつ右パネルのカメラ検出可視化を継続させる。
   const [authMode, setAuthMode] = useState<AuthMode>("recognize");
-  const lastFiredKeyRef = useRef<string | null>(null);
+  // マウント時点の「分」を発火済みとして初期化する。スケジュール再起動後の
+  // 起動が同じ分のうちに完了すると、マウント直後のチェックで再度再起動が
+  // 走り続ける(再起動ループ)ため、起動した分には発火させない。
+  const lastFiredKeyRef = useRef<string | null>(
+    `${new Date().toDateString()}_${currentHHMM()}`,
+  );
 
   useKioskSocket(settings.wsEndpoint, refetch, settings.wsSignalField, settings.wsSignalValue);
 
@@ -81,7 +86,8 @@ function MainScreen() {
       });
     }
 
-    // 対象分の途中で画面がマウントされた場合も、その日の実行を取り逃さない。
+    // マウントした分は lastFiredKeyRef の初期値により発火しない(再起動ループ防止)。
+    // スケジュール設定の変更後など、次の分以降の一致から発火する。
     checkRebootSchedule();
     const timer = window.setInterval(checkRebootSchedule, 60_000);
     return () => window.clearInterval(timer);

@@ -33,6 +33,10 @@ const MAX_CONSECUTIVE_ERRORS: u32 = 15;
 // キャプチャ中もこの間隔でパフォーマンス設定を読み直し、送信間隔・JPEG品質の
 // 変更をカメラを掴み直さずに反映する(設定保存→端末再起動を待たずに効くようにする)。
 const PERF_RELOAD_INTERVAL: Duration = Duration::from_secs(2);
+// 配信停止中(画面消灯中)のデコード間隔。消灯中は人感復帰ウォッチャー
+// (1.5秒間隔のポーリング)だけがフレームを読むため、毎フレームの MJPEG→RGB
+// デコードは不要。この間隔まで間引いて消灯中の CPU 使用率・発熱を抑える。
+const PAUSED_DECODE_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,17 +64,47 @@ struct CaptureHandle {
 }
 
 #[derive(Default)]
-pub struct CameraCaptureState(Mutex<Option<CaptureHandle>>);
+struct CameraCaptureInner {
+    handle: Mutex<Option<CaptureHandle>>,
+    /// 画面消灯中はフロントへの配信(JPEG化・emit)を止め、デコードも間引く。
+    /// 推論用の SharedFrame 更新(間引き後)と人感復帰は影響を受けない。
+    emit_paused: AtomicBool,
+}
+
+/// Arc で包み、コマンド側が spawn_blocking へ clone して渡せるようにする。
+/// (stop はキャプチャスレッドの join を伴うため、メインスレッドで実行すると
+/// v4l2 が固まった場合に UI 全体がフリーズする)
+#[derive(Clone, Default)]
+pub struct CameraCaptureState(Arc<CameraCaptureInner>);
 
 #[tauri::command]
-pub fn start_camera_capture(
+pub async fn start_camera_capture(
     app: AppHandle,
-    state: State<CameraCaptureState>,
-    shared_frame: State<SharedFrame>,
-    overlay_state: State<OverlayState>,
+    state: State<'_, CameraCaptureState>,
+    shared_frame: State<'_, SharedFrame>,
+    overlay_state: State<'_, OverlayState>,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    let shared_frame = shared_frame.inner().clone();
+    let overlay = overlay_state.inner().clone();
+    // 停止処理が終了待ちで状態ロックを保持している場合にブロックしても、
+    // メインスレッド(UI)を巻き込まないようブロッキングスレッドで実行する。
+    tauri::async_runtime::spawn_blocking(move || {
+        start_capture_blocking(app, &state, shared_frame, overlay)
+    })
+    .await
+    .map_err(|e| format!("カメラ開始タスクが失敗しました: {e}"))?
+}
+
+fn start_capture_blocking(
+    app: AppHandle,
+    state: &CameraCaptureState,
+    shared_frame: SharedFrame,
+    overlay: OverlayState,
 ) -> Result<(), String> {
     let mut guard = state
         .0
+        .handle
         .lock()
         .map_err(|_| "内部状態のロックに失敗しました".to_string())?;
     if let Some(handle) = guard.as_ref() {
@@ -89,14 +123,14 @@ pub fn start_camera_capture(
 
     let stop_flag = Arc::new(AtomicBool::new(false));
     let thread_stop_flag = stop_flag.clone();
-    let thread_shared_frame = shared_frame.inner().clone();
-    let thread_overlay = overlay_state.inner().clone();
+    let thread_state = state.0.clone();
     let join_handle = std::thread::spawn(move || {
         run_capture_loop(
             &app,
             &thread_stop_flag,
-            &thread_shared_frame,
-            &thread_overlay,
+            &thread_state,
+            &shared_frame,
+            &overlay,
         )
     });
 
@@ -108,9 +142,18 @@ pub fn start_camera_capture(
 }
 
 #[tauri::command]
-pub fn stop_camera_capture(state: State<CameraCaptureState>) -> Result<(), String> {
+pub async fn stop_camera_capture(state: State<'_, CameraCaptureState>) -> Result<(), String> {
+    let state = state.inner().clone();
+    // join はカメラ解放(最悪ハング)まで戻らないため、メインスレッドでは行わない。
+    tauri::async_runtime::spawn_blocking(move || stop_capture_blocking(&state))
+        .await
+        .map_err(|e| format!("カメラ停止タスクが失敗しました: {e}"))?
+}
+
+fn stop_capture_blocking(state: &CameraCaptureState) -> Result<(), String> {
     let mut guard = state
         .0
+        .handle
         .lock()
         .map_err(|_| "内部状態のロックに失敗しました".to_string())?;
     if let Some(handle) = guard.take() {
@@ -125,6 +168,21 @@ pub fn stop_camera_capture(state: State<CameraCaptureState>) -> Result<(), Strin
             .map_err(|_| "カメラキャプチャスレッドが異常終了しました".to_string())?;
     }
     Ok(())
+}
+
+/// 画面消灯中のフロント配信を一時停止/再開する(ScreenDimmer から呼ぶ)。
+/// 停止中もカメラは掴んだままで、人感復帰用の SharedFrame 更新は間引いて継続する。
+#[tauri::command]
+pub fn set_camera_stream_paused(state: State<'_, CameraCaptureState>, paused: bool) {
+    state.0.emit_paused.store(paused, Ordering::SeqCst);
+    eprintln!(
+        "[camera-capture] フロント配信を{}",
+        if paused {
+            "一時停止(消灯中の省電力モード)"
+        } else {
+            "再開"
+        }
+    );
 }
 
 // 要求フォーマットの候補。nokhwa の Closest は FrameFormat の完全一致を要求する
@@ -290,6 +348,7 @@ fn open_first_available_camera() -> Result<Camera, String> {
 fn run_capture_loop(
     app: &AppHandle,
     stop_flag: &Arc<AtomicBool>,
+    capture_state: &Arc<CameraCaptureInner>,
     shared_frame: &SharedFrame,
     overlay: &OverlayState,
 ) {
@@ -324,6 +383,8 @@ fn run_capture_loop(
     let mut consecutive_capture_errors: u32 = 0;
     let mut consecutive_encode_errors: u32 = 0;
     let mut last_frame_emit: Option<Instant> = None;
+    // SharedFrame(推論用)を最後に更新した時刻。配信停止中のデコード間引きに使う。
+    let mut last_shared_update: Option<Instant> = None;
     while !stop_flag.load(Ordering::SeqCst) {
         // 設定変更(送信間隔・JPEG品質)を掴み直しなしで反映する。頻繁な store 読み
         // 出しを避けるため一定間隔でのみ読み直す。
@@ -344,13 +405,27 @@ fn run_capture_loop(
         // カメラからの取得と SharedFrame の更新はデバイスのフレームペースで
         // 継続する。表示用の RGB コピー・JPEG 化・emit だけを設定間隔で間引き、
         // 表示 FPS が推論に使う最新フレームの鮮度に影響しないようにする。
-        let should_emit = last_frame_emit
-            .map(|last| last.elapsed() >= emit_interval)
-            .unwrap_or(true);
+        //
+        // 配信停止中(画面消灯中)は emit を行わず、MJPEG→RGB デコードも
+        // PAUSED_DECODE_INTERVAL まで間引く(人感復帰ウォッチャーが読む
+        // SharedFrame の鮮度はその間隔で十分)。フレーム自体は取得し続けて
+        // カメラのストリームは止めない。
+        let paused = capture_state.emit_paused.load(Ordering::SeqCst);
+        let should_emit = !paused
+            && last_frame_emit
+                .map(|last| last.elapsed() >= emit_interval)
+                .unwrap_or(true);
+        let should_decode = !paused
+            || last_shared_update
+                .map(|last| last.elapsed() >= PAUSED_DECODE_INTERVAL)
+                .unwrap_or(true);
 
-        match capture_latest_frame(&mut camera, shared_frame, should_emit) {
+        match capture_latest_frame(&mut camera, shared_frame, should_emit, should_decode) {
             Ok(display_frame) => {
                 consecutive_capture_errors = 0;
+                if should_decode {
+                    last_shared_update = Some(Instant::now());
+                }
 
                 let Some(display_frame) = display_frame else {
                     continue;
@@ -401,14 +476,19 @@ struct DisplayFrame {
     rgb: Vec<u8>,
 }
 
-/// カメラから1フレーム取得・デコードし、推論用の最新フレームを更新する。
+/// カメラから1フレーム取得し、`decode` のときだけ RGB へデコードして推論用の
+/// 最新フレームを更新する(消灯中はデコード自体を間引いて CPU を節約する)。
 /// `copy_for_display` のときだけ表示用 RGB を複製し、JPEG エンコードは呼び出し側で行う。
 fn capture_latest_frame(
     camera: &mut Camera,
     shared_frame: &SharedFrame,
     copy_for_display: bool,
+    decode: bool,
 ) -> Result<Option<DisplayFrame>, String> {
     let frame = camera.frame().map_err(|e| e.to_string())?;
+    if !decode {
+        return Ok(None);
+    }
     let decoded = frame
         .decode_image::<RgbFormat>()
         .map_err(|e| e.to_string())?;

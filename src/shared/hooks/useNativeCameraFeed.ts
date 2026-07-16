@@ -153,6 +153,9 @@ export function useNativeCameraFeed(): UseNativeCameraFeedResult {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : String(err));
         setStatus("error");
+        // 稼働中のエラー(camera-error)と同様、初回の開始失敗も自動で
+        // 再起動を試みる(無人キオスクでの自己復旧)。
+        scheduleRestart();
       }
     }
 

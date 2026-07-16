@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Instant;
-use sysinfo::{Disks, Networks, System};
+use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System};
 use tauri::State;
 
 mod camera_capture;
@@ -82,8 +82,14 @@ struct SystemSpec {
 
 #[tauri::command]
 fn get_system_spec() -> SystemSpec {
-    let mut sys = System::new_all();
-    sys.refresh_all();
+    // New_all()/refresh_all() は全プロセスの走査(/proc 全読み)まで行い
+    // 重い上にメインスレッドで実行されるため、必要な CPU 一覧とメモリ量だけを
+    // 対象にして起動診断を軽くする。
+    let sys = System::new_with_specifics(
+        RefreshKind::nothing()
+            .with_cpu(CpuRefreshKind::nothing())
+            .with_memory(MemoryRefreshKind::nothing().with_ram()),
+    );
 
     let cpu_brand = sys
         .cpus()
@@ -329,6 +335,7 @@ pub fn run() {
             set_display_power,
             camera_capture::start_camera_capture,
             camera_capture::stop_camera_capture,
+            camera_capture::set_camera_stream_paused,
             vision::init_vision,
             vision::init_face_vision,
             vision::set_enrolled_faces,

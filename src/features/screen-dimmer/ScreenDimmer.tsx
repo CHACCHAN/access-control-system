@@ -29,6 +29,17 @@ async function setDisplayPower(on: boolean): Promise<void> {
   }
 }
 
+// 消灯中はカメラ映像のフロント配信(JPEG化・IPC・デコード)を止めて CPU と
+// 発熱を抑える。カメラ自体と人感復帰用のフレーム共有は Rust 側で継続する。
+async function setCameraStreamPaused(paused: boolean): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke("set_camera_stream_paused", { paused });
+  } catch (err) {
+    console.error(`[screen-dimmer] カメラ配信の${paused ? "停止" : "再開"}に失敗:`, err);
+  }
+}
+
 // Rust 側の人感復帰ウォッチャーの開始/停止(ブラウザ実行では何もしない)
 async function invokeQuiet(command: string): Promise<void> {
   if (!isTauri()) return;
@@ -129,11 +140,16 @@ export function ScreenDimmer({ onDimmedChange }: { onDimmedChange?: (dimmed: boo
     const timer = window.setTimeout(() => {
       console.log("[screen-dimmer] フェード完了 → ディスプレイを物理消灯します");
       void setDisplayPower(false);
+      // 誰も見ていない映像の JPEG 化・IPC・デコードを止める(発熱・CPU対策)。
+      // フェード完了後に止めるので、フェード中の映像は最後まで動いたまま。
+      void setCameraStreamPaused(true);
     }, POWER_OFF_DELAY_MS);
 
     return () => {
       window.clearTimeout(timer);
       void invokeQuiet("stop_wake_watch");
+      // 復帰経路(操作・人感)によらず必ず配信を再開する
+      void setCameraStreamPaused(false);
     };
   }, [isDimmed]);
 
