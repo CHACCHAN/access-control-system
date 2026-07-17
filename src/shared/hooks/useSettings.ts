@@ -48,6 +48,17 @@ export const DEFAULT_GESTURE_STATUS_MAP: GestureStatusMap = {
 export type RejectGesture = "ThumbsDown" | "";
 export const DEFAULT_REJECT_GESTURE: RejectGesture = "ThumbsDown";
 
+// 外部サイト(ポータル・Wiki・スケジュール表など)。トップ画面の地球儀ボタン
+// からアプリ内ブラウザ(サーバサイド取得型)で開く。
+export interface ExternalSite {
+  /** 一覧に表示する名前(空なら URL のホスト名を表示) */
+  name: string;
+  url: string;
+}
+
+/** 登録できる外部サイトの上限(設定画面・正規化の両方で使う) */
+export const MAX_EXTERNAL_SITES = 12;
+
 // パフォーマンス調整。推論のポーリング間隔やカメラ配信のパラメータを
 // 端末スペックに合わせて設定画面から調整できるようにする。
 // camera* / match* / minFaceWidthRatio は Rust 側も settings.json から読むため、
@@ -170,11 +181,21 @@ export interface AppSettings {
   // スピーカーのハードウェア音量(ALSA Master、0〜100%)。
   // ソフトウェア音量ではなく端末の実音量。起動時と設定変更時に amixer で反映する。
   hardwareVolume: number;
+  // 自動再起動のオン/オフ。オフの間は rebootSchedule の時刻を保持したまま発火しない
+  rebootScheduleEnabled: boolean;
   rebootSchedule: string;
+  // 自動消灯のオン/オフ。オフの間は screenOffMinutes を保持したまま消灯しない
+  screenOffEnabled: boolean;
   // 自動消灯までの無操作時間(分)。「時刻」ではなく「時間(経過)」で指定する。
   // 0 は無効。操作・人物接近(顔検出)で復帰する。
   screenOffMinutes: number;
+  // 人物不在時の減光(自動消灯とは別)。カメラに顔が写っておらず操作も無い状態が
+  // 続くと画面を半分暗くし、人が近づく(顔検出)か操作で即復帰する
+  presenceDimmingEnabled: boolean;
   getEndpoint: string;
+  // 外部サイト(ポータル等)。トップ画面の地球儀ボタンからアプリ内ブラウザで開く。
+  // 複数登録すると一覧から選択、1件なら直接開く
+  externalSites: ExternalSite[];
   // 顔特徴ベクトル登録 API(POST {postEndpoint}/{username})
   postEndpoint: string;
   // 在室状況更新 API(POST {attendanceEndpoint})。descriptor 登録とは別のエンドポイント。
@@ -201,9 +222,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: "dark",
   uiScale: UI_SCALE_DEFAULT,
   hardwareVolume: HARDWARE_VOLUME_DEFAULT,
+  rebootScheduleEnabled: true,
   rebootSchedule: "",
+  screenOffEnabled: true,
   screenOffMinutes: 0,
+  presenceDimmingEnabled: true,
   getEndpoint: "",
+  externalSites: [],
   postEndpoint: "",
   attendanceEndpoint: "",
   wsEndpoint: "",
@@ -217,6 +242,28 @@ export const DEFAULT_SETTINGS: AppSettings = {
   performance: DEFAULT_PERFORMANCE,
   appearance: DEFAULT_APPEARANCE,
 };
+
+/** 外部サイト一覧の正規化。旧設定(単一の portalUrl)からの移行も行う。 */
+function normalizeExternalSites(stored: Partial<AppSettings>): ExternalSite[] {
+  // 保存データは型未保証のため unknown として検証する
+  const raw: unknown[] = Array.isArray(stored.externalSites) ? stored.externalSites : [];
+  const sites = raw
+    .filter((site): site is Record<string, unknown> => !!site && typeof site === "object")
+    .map((site) => ({
+      name: typeof site.name === "string" ? site.name : "",
+      url: typeof site.url === "string" ? site.url : "",
+    }))
+    // 完全な空行は保存しない(編集途中の行を残さない)
+    .filter((site) => site.name.trim() !== "" || site.url.trim() !== "")
+    .slice(0, MAX_EXTERNAL_SITES);
+
+  // 旧バージョンの portalUrl(単一URL)からの移行
+  const legacyPortalUrl = (stored as { portalUrl?: unknown }).portalUrl;
+  if (sites.length === 0 && typeof legacyPortalUrl === "string" && legacyPortalUrl.trim() !== "") {
+    sites.push({ name: "ポータルサイト", url: legacyPortalUrl });
+  }
+  return sites;
+}
 
 function finiteInRange(
   value: unknown,
@@ -269,13 +316,26 @@ export function normalizeSettings(value: unknown): AppSettings {
         ? stored.hardwareVolume
         : HARDWARE_VOLUME_DEFAULT,
     ),
+    rebootScheduleEnabled:
+      typeof stored.rebootScheduleEnabled === "boolean"
+        ? stored.rebootScheduleEnabled
+        : DEFAULT_SETTINGS.rebootScheduleEnabled,
     rebootSchedule:
       typeof stored.rebootSchedule === "string" &&
       (stored.rebootSchedule === "" || /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(stored.rebootSchedule))
         ? stored.rebootSchedule
         : "",
+    screenOffEnabled:
+      typeof stored.screenOffEnabled === "boolean"
+        ? stored.screenOffEnabled
+        : DEFAULT_SETTINGS.screenOffEnabled,
     screenOffMinutes: finiteInRange(stored.screenOffMinutes, 0, 0, 720, true),
+    presenceDimmingEnabled:
+      typeof stored.presenceDimmingEnabled === "boolean"
+        ? stored.presenceDimmingEnabled
+        : DEFAULT_SETTINGS.presenceDimmingEnabled,
     getEndpoint: stringValue(stored.getEndpoint, DEFAULT_SETTINGS.getEndpoint),
+    externalSites: normalizeExternalSites(stored),
     postEndpoint: stringValue(stored.postEndpoint, DEFAULT_SETTINGS.postEndpoint),
     attendanceEndpoint: stringValue(
       stored.attendanceEndpoint,
@@ -426,6 +486,7 @@ function cloneSettings(settings: AppSettings): AppSettings {
     gestureStatusMap: { ...settings.gestureStatusMap },
     performance: { ...settings.performance },
     appearance: { ...settings.appearance },
+    externalSites: settings.externalSites.map((site) => ({ ...site })),
   };
 }
 

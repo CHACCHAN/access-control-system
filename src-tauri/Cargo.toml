@@ -1,6 +1,6 @@
 [package]
 name = "access-control-system"
-version = "0.2.33"
+version = "0.2.36"
 description = "Laboratory attendance kiosk with face and gesture recognition"
 authors = ["Yuya Nakayama"]
 license = "MIT"

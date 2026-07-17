@@ -81,6 +81,53 @@ export function Field({
 }
 
 /**
+ * オン/オフのトグルスイッチ。ラベル+補足付きの行として表示する。
+ * OS 標準チェックボックスはダークテーマで見づらいため、スライド式で統一する。
+ */
+export function ToggleField({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint?: ReactNode;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{label}</p>
+        {hint && (
+          <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
+            {hint}
+          </p>
+        )}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition-colors ${
+          checked
+            ? "bg-cyan-500 shadow-glow-sm"
+            : "bg-slate-300 dark:bg-slate-700"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+            checked ? "left-5.5" : "left-0.5"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
+/**
  * 設定セクションを囲むカード。四隅に HUD 風のシアンマーカーを添える。
  */
 export function SettingsCard({ children }: { children: ReactNode }) {

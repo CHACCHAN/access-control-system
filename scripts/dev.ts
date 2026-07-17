@@ -24,6 +24,9 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "Access-Control-Allow-Headers": "Authorization,Content-Type,Accept",
+  // 中継経由では Response.url が中継サーバのURLになるため、転送先の
+  // 最終URL(リダイレクト追跡後)を X-Final-Url で伝える(ポータル表示で使用)。
+  "Access-Control-Expose-Headers": "X-Final-Url",
   "Access-Control-Max-Age": "86400",
 };
 
@@ -72,6 +75,7 @@ Bun.serve({
       const respHeaders = new Headers(CORS_HEADERS);
       const contentType = upstream.headers.get("content-type");
       if (contentType) respHeaders.set("Content-Type", contentType);
+      if (upstream.url) respHeaders.set("X-Final-Url", upstream.url);
 
       return new Response(upstream.body, {
         status: upstream.status,

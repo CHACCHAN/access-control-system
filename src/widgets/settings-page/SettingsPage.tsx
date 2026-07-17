@@ -83,6 +83,18 @@ function validateSettings(settings: AppSettings): string | null {
       return `${label}のURL形式が不正です`;
     }
   }
+
+  for (const site of settings.externalSites) {
+    const label = site.name.trim() || site.url || "(名称未設定)";
+    if (!site.url.trim()) return `外部サイト「${label}」のURLが未入力です`;
+    try {
+      if (!["http:", "https:"].includes(new URL(site.url).protocol)) {
+        return `外部サイト「${label}」のURL形式が不正です(http/httpsのみ)`;
+      }
+    } catch {
+      return `外部サイト「${label}」のURL形式が不正です(http/httpsのみ)`;
+    }
+  }
   return null;
 }
 

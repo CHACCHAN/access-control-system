@@ -12,7 +12,7 @@ import {
 import { playUiSound } from "@/shared/lib/uiSound";
 import { useTheme } from "@/shared/theme/ThemeContext";
 import { MoonIcon, SlidersIcon, SunIcon } from "@/shared/ui/icons";
-import { Field, INPUT_CLASS, SectionHeader, SettingsCard } from "../fields";
+import { Field, INPUT_CLASS, SectionHeader, SettingsCard, ToggleField } from "../fields";
 
 interface SectionProps {
   draft: AppSettings;
@@ -165,41 +165,68 @@ export function GeneralSection({ draft, setDraft }: SectionProps) {
           </div>
         </div>
 
-        <Field label="再起動スケジュール" htmlFor="reboot-schedule" hint="毎日この時刻に端末を自動再起動します">
-          <input
-            id="reboot-schedule"
-            type="time"
-            value={draft.rebootSchedule}
-            onChange={(e) => setDraft((d) => ({ ...d, rebootSchedule: e.target.value }))}
-            className={INPUT_CLASS}
+        <div className="space-y-4 border-t border-dashed border-slate-200 pt-5 dark:border-white/10">
+          <ToggleField
+            label="自動再起動"
+            hint="毎日決まった時刻に端末を自動再起動します"
+            checked={draft.rebootScheduleEnabled}
+            onChange={(checked) => setDraft((d) => ({ ...d, rebootScheduleEnabled: checked }))}
           />
-        </Field>
-
-        <Field
-          label="自動消灯時間"
-          htmlFor="screen-off-minutes"
-          hint="無操作がこの時間続くと画面を暗転します(0 で無効)。操作するか人が近づくと復帰します"
-        >
-          <div className="flex items-center gap-2">
+          <Field label="再起動時刻" htmlFor="reboot-schedule" hint="HH:MM(空欄で無効)">
             <input
-              id="screen-off-minutes"
-              type="number"
-              min={0}
-              max={720}
-              step={1}
-              value={draft.screenOffMinutes}
-              onChange={(e) => {
-                const n = e.target.valueAsNumber;
-                setDraft((d) => ({
-                  ...d,
-                  screenOffMinutes: Number.isNaN(n) ? 0 : Math.max(0, Math.round(n)),
-                }));
-              }}
-              className={`${INPUT_CLASS} w-28`}
+              id="reboot-schedule"
+              type="time"
+              value={draft.rebootSchedule}
+              disabled={!draft.rebootScheduleEnabled}
+              onChange={(e) => setDraft((d) => ({ ...d, rebootSchedule: e.target.value }))}
+              className={`${INPUT_CLASS} disabled:cursor-not-allowed disabled:opacity-50`}
             />
-            <span className="text-xs text-slate-500 dark:text-slate-400">分</span>
-          </div>
-        </Field>
+          </Field>
+        </div>
+
+        <div className="space-y-4 border-t border-dashed border-slate-200 pt-5 dark:border-white/10">
+          <ToggleField
+            label="自動消灯"
+            hint="無操作が続いたら画面を物理消灯します(発熱対策)。操作するか人が近づくと復帰します"
+            checked={draft.screenOffEnabled}
+            onChange={(checked) => setDraft((d) => ({ ...d, screenOffEnabled: checked }))}
+          />
+          <Field
+            label="自動消灯時間"
+            htmlFor="screen-off-minutes"
+            hint="無操作がこの時間続くと消灯します(0 で無効)"
+          >
+            <div className="flex items-center gap-2">
+              <input
+                id="screen-off-minutes"
+                type="number"
+                min={0}
+                max={720}
+                step={1}
+                value={draft.screenOffMinutes}
+                disabled={!draft.screenOffEnabled}
+                onChange={(e) => {
+                  const n = e.target.valueAsNumber;
+                  setDraft((d) => ({
+                    ...d,
+                    screenOffMinutes: Number.isNaN(n) ? 0 : Math.max(0, Math.round(n)),
+                  }));
+                }}
+                className={`${INPUT_CLASS} w-28 disabled:cursor-not-allowed disabled:opacity-50`}
+              />
+              <span className="text-xs text-slate-500 dark:text-slate-400">分</span>
+            </div>
+          </Field>
+        </div>
+
+        <div className="border-t border-dashed border-slate-200 pt-5 dark:border-white/10">
+          <ToggleField
+            label="人物不在時の減光"
+            hint="カメラに人が写っておらず操作も無い状態が10秒続くと画面を半分暗くします(自動消灯とは別)。人が近づくか操作すると即復帰します"
+            checked={draft.presenceDimmingEnabled}
+            onChange={(checked) => setDraft((d) => ({ ...d, presenceDimmingEnabled: checked }))}
+          />
+        </div>
       </div>
     </SettingsCard>
   );

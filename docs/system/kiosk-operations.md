@@ -18,8 +18,23 @@ X セッション唯一のクライアントとして起動する構成を前提
 
 | 設定 | 動作 |
 |---|---|
-| rebootSchedule | 毎日一致時刻(HH:MM)に端末を自動再起動。1 分間隔で監視し、日付込みの発火キーで「その日 1 回だけ」実行。起動(マウント)した分は発火済みとして扱い、再起動後の起動が同じ分内に完了しても再起動を繰り返さない |
-| screenOffMinutes | **無操作がこの時間(分)続いたら**画面を暗転(ScreenDimmer)。時刻ではなく経過時間。0 で無効 |
+| rebootSchedule | 毎日一致時刻(HH:MM)に端末を自動再起動。1 分間隔で監視し、日付込みの発火キーで「その日 1 回だけ」実行。起動(マウント)した分は発火済みとして扱い、再起動後の起動が同じ分内に完了しても再起動を繰り返さない。`rebootScheduleEnabled`(トグル)がオフなら時刻を保持したまま発火しない |
+| screenOffMinutes | **無操作がこの時間(分)続いたら**画面を暗転(ScreenDimmer)。時刻ではなく経過時間。0 で無効。`screenOffEnabled`(トグル)がオフなら分数を保持したまま消灯しない |
+| presenceDimmingEnabled | **人物不在時の減光**(下記) |
+
+### 人物不在時の減光(PresenceDimmer)
+
+自動消灯より手前の第1段階として、**人がいないときだけ画面を半分暗くする**。
+
+- 在席シグナルは2系統: **カメラの顔検出**(顔認証ループが顔を検出するたび)と
+  **ユーザー操作**(pointerdown / mousemove / keydown / touchstart)。
+- どちらも無い状態が **10 秒**続くと黒レイヤーを 55% の不透明度で重ねる
+  (1.5 秒フェード)。顔が写る(推論間隔≒1秒以内)か操作すると 0.3 秒で復帰。
+- 半減光中も顔認証ループ・カメラ配信は動き続ける(顔検出が復帰トリガーのため)。
+  DPMS には触れない(物理消灯は自動消灯の役割)。
+- 設定画面・外部サイト表示中・完全消灯中は判定を止める(外部サイトは iframe 内の
+  操作が window に届かず誤減光するため)。
+- 自動消灯(screenOffMinutes)の無操作タイマーとは独立して動く。
 
 ### 画面消灯(ScreenDimmer)
 
@@ -77,4 +92,5 @@ X セッション唯一のクライアントとして起動する構成を前提
 
 - `tauri build` で deb を生成。ONNX モデル(5 点)と libonnxruntime.so を
   リソースとして同梱する(`tauri.conf.json` の `bundle.resources`)。
-- HTTP アクセスは capability で `https://*.chibatech.ac.jp/*` に制限。
+- HTTP アクセス(plugin-http)の capability は `http://*:*` / `https://*:*`
+  (外部サイトを任意 URL で開けるようにするため)→ [api/http-routing.md](../api/http-routing.md)。

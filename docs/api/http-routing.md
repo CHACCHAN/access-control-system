@@ -2,6 +2,9 @@
 
 外部 API への HTTP リクエストは、実行環境によって経路が異なる。
 分岐は `src/shared/lib/httpClient.ts` の `httpFetch` に集約されている。
+外部サイトの HTML 取得(→ [ui/screens.md](../ui/screens.md))も
+同じ `httpFetch` を使う。`httpFetch` はリダイレクト追跡後の最終 URL を
+`Response.url` として引き継ぐ。
 
 ## 経路一覧
 
@@ -15,9 +18,12 @@
 
 - WebKitGTK の CORS 制約を避けるため、`tauri-plugin-http` の fetch を使う。
   サーバーが `Access-Control-Allow-Origin` を返さなくても疎通できる。
-- アクセス可能な URL は capability で制限している
-  (`src-tauri/capabilities/default.json`): `https://*.chibatech.ac.jp/*`
-  以外のホストへは接続できない。エンドポイントのドメインを変える場合はここも更新する。
+- capability(`src-tauri/capabilities/default.json`)の許可 URL は
+  `http://*:*` / `https://*:*`(任意ホスト・任意ポート)。
+  かつては `https://*.chibatech.ac.jp/*` に限定していたが、外部サイト
+  (`externalSites`。設定でいつでも変更できる任意 URL)を同じ経路で取得する
+  仕様になったため撤廃した。パターンは URLPattern 形式で、ポート既定値の
+  URL(ポート表記なし)にも `*` はマッチする。
 
 ## 開発時ブラウザ(中継サーバー)
 
@@ -30,6 +36,9 @@
   ただし `host` / `origin` / `referer` / `connection` / `content-length` は転送前に除去。
 - OPTIONS プリフライトには 204 + CORS 許可ヘッダーで応答する。
   許可ヘッダー: `Authorization, Content-Type, Accept`
+- 転送先の最終 URL(リダイレクト追跡後)を `X-Final-Url` ヘッダーで返す
+  (`Access-Control-Expose-Headers` で公開)。外部サイト表示が
+  相対 URL の解決基準として使う。
 - 転送失敗時は 502 でエラーメッセージを返す。
 - ポート番号はフロント(`httpClient.ts` の `DEV_PROXY_PORT`)と一致させること。
   `scripts/dev.ts` が `DEV_PROXY_PORT` をVite公開変数へ引き継ぐため、環境変数で変更しても

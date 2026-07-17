@@ -26,6 +26,8 @@ interface UseFaceRecognitionLoopParams {
    * 検出の可視化(Rust がフレームへ描く枠・ランドマーク)だけを走らせる。
    */
   enableMatch?: boolean;
+  /** 顔が検出されるたびに呼ばれる(人物不在時の減光の在席シグナル用) */
+  onFaceSeen?: () => void;
 }
 
 interface UseFaceRecognitionLoopResult {
@@ -47,6 +49,7 @@ export function useFaceRecognitionLoop({
   enrolledFaces,
   active,
   enableMatch = true,
+  onFaceSeen,
 }: UseFaceRecognitionLoopParams): UseFaceRecognitionLoopResult {
   const { settings } = useSettings();
   // 推論はRust側(i7-3770想定)で数百ms かかるため、過度なポーリングに
@@ -73,6 +76,9 @@ export function useFaceRecognitionLoop({
   // 手動否認・記録後、同じ顔が写ったまま即再表示されないよう、一度顔が
   // フレームから外れるまで次の確定を抑止する。
   const awaitingFaceExitRef = useRef(false);
+  // ポーリング効果を張り直さずに最新のコールバックを呼ぶためのミラー
+  const onFaceSeenRef = useRef(onFaceSeen);
+  onFaceSeenRef.current = onFaceSeen;
 
   useEffect(() => {
     if (enableMatch) return;
@@ -116,6 +122,10 @@ export function useFaceRecognitionLoop({
           );
         }
         errorLoggedRef.current = false;
+
+        // どのモード(認証・登録・確認カード中)でも、顔が写っていれば
+        // 在席シグナルを送る(人物不在時の減光の復帰・抑止用)。
+        if (result.faceDetected) onFaceSeenRef.current?.();
 
         // 登録中(enableMatch=false)は検出の可視化だけ走らせ、確定はしない
         if (!enableMatch) {

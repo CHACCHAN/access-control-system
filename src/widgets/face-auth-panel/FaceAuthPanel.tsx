@@ -12,7 +12,7 @@ import {
 import { useGestureStatusLoop } from "@/features/gesture/useGestureStatusLoop";
 import { postAttendance } from "@/entities/member/attendanceApi";
 import { playUiSound } from "@/shared/lib/uiSound";
-import { ArrowUpIcon, GearIcon, ScanFaceIcon } from "@/shared/ui/icons";
+import { ArrowUpIcon, GearIcon, GlobeIcon, ScanFaceIcon } from "@/shared/ui/icons";
 import { isAnimatedPattern, PATTERN_CLASS, useSettings } from "@/shared/hooks/useSettings";
 import type { AuthMode } from "@/features/face-auth/model";
 
@@ -25,17 +25,22 @@ const HINT_TEXT: Record<Exclude<FaceScanHint, null>, string> = {
 
 interface FaceAuthPanelProps {
   onOpenSettings: () => void;
+  onOpenExternalSite: () => void;
   mode: AuthMode;
   setMode: (mode: AuthMode) => void;
   /** 設定画面や消灯レイヤーの背後では推論・非接触POSTを停止する。 */
   isInteractive: boolean;
+  /** 顔が検出されるたびに呼ばれる(人物不在時の減光の在席シグナル) */
+  onFaceSeen?: () => void;
 }
 
 export function FaceAuthPanel({
   onOpenSettings,
+  onOpenExternalSite,
   mode,
   setMode,
   isInteractive,
+  onFaceSeen,
 }: FaceAuthPanelProps) {
   const { settings } = useSettings();
   const customBg = settings.appearance.authPanelBg;
@@ -61,6 +66,7 @@ export function FaceAuthPanel({
     enrolledFaces,
     active: isInteractive && !isPaused && visionReady && cameraStatus === "streaming",
     enableMatch: mode === "recognize",
+    onFaceSeen,
   });
 
   function handleConfirmMatch() {
@@ -166,6 +172,13 @@ export function FaceAuthPanel({
             {mode === "register" ? "認証に戻る" : "顔を登録する"}
           </button>
           <ThemeToggleButton />
+          <button
+            onClick={onOpenExternalSite}
+            aria-label="外部サイトを開く"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-cyan-400/50 hover:text-cyan-600 dark:border-white/10 dark:bg-slate-800/60 dark:text-slate-200 dark:shadow-none dark:hover:border-cyan-400/50 dark:hover:text-cyan-300"
+          >
+            <GlobeIcon className="h-4.5 w-4.5" />
+          </button>
           <button
             onClick={onOpenSettings}
             aria-label="設定を開く"

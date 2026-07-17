@@ -29,8 +29,11 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 | theme | dark | ライト / ダークテーマ |
 | uiScale | 1.0 | UI 全体の拡大率(0.8〜1.5)。ルート font-size を倍率で変え、rem ベースのサイズ・余白・文字を一括で拡大縮小 |
 | hardwareVolume | 80 | スピーカーの**ハードウェア音量**(0〜100%)。ソフトウェア音量ではなく ALSA(amixer sset Master、無ければ PCM)を直接操作する。スライダー操作時に設定へ即時保存して端末へ反映するため、設定画面を閉じても値は維持される。起動時にも保存値を再適用する |
+| rebootScheduleEnabled | true | 自動再起動のオン/オフ(トグル)。オフの間は rebootSchedule を保持したまま発火しない |
 | rebootSchedule | (空) | 毎日この時刻(HH:MM)に端末を自動再起動 |
+| screenOffEnabled | true | 自動消灯のオン/オフ(トグル)。オフの間は screenOffMinutes を保持したまま消灯しない |
 | screenOffMinutes | 0 | **無操作がこの時間(分)続いたら**消灯(0 で無効)。時刻指定ではなく経過時間。フェード後に DPMS でディスプレイを物理消灯(発熱対策)。操作または人物接近(顔検出)で物理点灯して復帰 |
+| presenceDimmingEnabled | true | **人物不在時の減光**(自動消灯とは別の第1段階)。カメラに顔が写っておらず操作も無い状態が10秒続くと画面を半分暗くする。顔が写るか操作すると即復帰。設定画面・外部サイト表示中・完全消灯中は判定しない → [system/kiosk-operations.md](../system/kiosk-operations.md) |
 
 `theme` / `uiScale` / `hardwareVolume` は**保存不要の即時反映**(操作した瞬間に
 設定へ書き込まれ、端末にも適用される)。その他の項目は「保存」で一括反映
@@ -76,6 +79,7 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 | attendanceEndpoint | 在室状況更新 API(POST) |
 | wsEndpoint | 更新シグナル WebSocket |
 | apiToken | Authorization ヘッダーへそのまま送る値(例: `Bearer xxx`) |
+| externalSites | 外部サイトの一覧(`{ name, url }` の配列、最大12件)。トップ画面の地球儀ボタンからアプリ内のフルスクリーンページとして開く。複数登録すると一覧から選択、1件なら直接開く。iframe 直接読み込みではなく、**他の API と同じ通信経路(開発時=中継サーバ / 実機=Rust reqwest)で HTML を取得して描画**するため、X-Frame-Options 等の埋め込み拒否の影響を受けない。サイト側の JavaScript は実行しない(サーバーレンダリングのサイト向け)。旧設定 `portalUrl`(単一URL)は読み込み時に1件目として自動移行される → [ui/screens.md](../ui/screens.md) |
 
 ### API ボディ(REQUEST BODY)
 

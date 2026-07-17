@@ -70,7 +70,8 @@ export function ScreenDimmer({ onDimmedChange }: { onDimmedChange?: (dimmed: boo
   const isDimmedRef = useRef(false);
   isDimmedRef.current = isDimmed;
 
-  const screenOffMinutes = settings.screenOffMinutes;
+  // 分数が設定されていても、トグルがオフなら自動消灯しない
+  const screenOffMinutes = settings.screenOffEnabled ? settings.screenOffMinutes : 0;
 
   useEffect(() => {
     onDimmedChange?.(isDimmed);

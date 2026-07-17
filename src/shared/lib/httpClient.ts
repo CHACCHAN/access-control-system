@@ -85,11 +85,17 @@ export async function httpFetch(
     // 同じタイムアウトとAbortSignalを適用できる。このアプリのAPIは小さなJSONのみ。
     const body = await response.arrayBuffer();
     const bodyInit = [101, 204, 205, 304].includes(response.status) ? null : body;
-    return new Response(bodyInit, {
+    const rebuilt = new Response(bodyInit, {
       status: response.status,
       statusText: response.statusText,
       headers: response.headers,
     });
+    // Response.url はコンストラクタで設定できないため明示的に引き継ぐ
+    // (リダイレクト後の最終URL。外部サイト表示の相対URL解決に使う)。
+    if (response.url) {
+      Object.defineProperty(rebuilt, "url", { value: response.url, writable: false });
+    }
+    return rebuilt;
   } catch (err) {
     if (timedOut) throw new HttpTimeoutError(timeoutMs);
     throw err;

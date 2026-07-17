@@ -12,7 +12,7 @@
     "store:allow-save",
     {
       "identifier": "http:default",
-      "allow": [{ "url": "https://*.chibatech.ac.jp/*" }]
+      "allow": [{ "url": "http://*:*" }, { "url": "https://*:*" }]
     }
   ]
 }

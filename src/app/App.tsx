@@ -9,6 +9,7 @@ import { AppProviders } from "./providers/AppProviders";
 import { useFaceAuth } from "@/features/face-auth/FaceAuthContext";
 import { useKioskSocket } from "@/features/kiosk-socket/useKioskSocket";
 import { ScreenDimmer } from "@/features/screen-dimmer/ScreenDimmer";
+import { PresenceDimOverlay, usePresenceDim } from "@/features/screen-dimmer/PresenceDimmer";
 import { useMembers } from "@/entities/member/MemberContext";
 import { isAnimatedPattern, PATTERN_CLASS, useSettings } from "@/shared/hooks/useSettings";
 import { useUiSoundEffects } from "@/shared/hooks/useUiSoundEffects";
@@ -21,6 +22,13 @@ import "./App.css";
 const SettingsPage = lazy(() =>
   import("@/widgets/settings-page/SettingsPage").then((module) => ({
     default: module.SettingsPage,
+  })),
+);
+
+// 外部サイト閲覧ページも設定と同様に遅延読み込みで分離する。
+const ExternalSitePage = lazy(() =>
+  import("@/widgets/external-site-page/ExternalSitePage").then((module) => ({
+    default: module.ExternalSitePage,
   })),
 );
 
@@ -54,6 +62,7 @@ function MainScreen() {
   const { settings, isLoading: isSettingsLoading } = useSettings();
   const { refetch } = useMembers();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isExternalSiteOpen, setIsExternalSiteOpen] = useState(false);
   const [isScreenDimmed, setIsScreenDimmed] = useState(false);
   // 顔認証パネルのモード。App レベルで持ち、登録中は左パネルを登録フォームに
   // 差し替えつつ右パネルのカメラ検出可視化を継続させる。
@@ -67,12 +76,19 @@ function MainScreen() {
 
   useKioskSocket(settings.wsEndpoint, refetch, settings.wsSignalField, settings.wsSignalValue);
 
+  // 人物不在時の減光(自動消灯とは別の第1段階)。顔検出(下の onFaceSeen)と
+  // 操作が両方途切れると半減光する。設定画面・外部サイト・完全消灯中は判定しない
+  // (外部サイト閲覧中は iframe 内の操作が window へ届かず、誤減光するため)。
+  const { isDim: isPresenceDim, reportPresence } = usePresenceDim(
+    settings.presenceDimmingEnabled && !isSettingsOpen && !isExternalSiteOpen && !isScreenDimmed,
+  );
+
   // 1分ごとに現在時刻をチェックし、再起動スケジュールと一致したら再起動する。
   // HH:MM は日をまたいで毎日同じ値になるため、発火済みかどうかは日付込みの
   // キーで管理し、翌日も同じ時刻に再起動できるようにしている。
   useEffect(() => {
     function checkRebootSchedule() {
-      if (!settings.rebootSchedule) return;
+      if (!settings.rebootScheduleEnabled || !settings.rebootSchedule) return;
       const now = new Date();
       const current = currentHHMM();
       if (current !== settings.rebootSchedule) return;
@@ -91,7 +107,7 @@ function MainScreen() {
     checkRebootSchedule();
     const timer = window.setInterval(checkRebootSchedule, 60_000);
     return () => window.clearInterval(timer);
-  }, [settings.rebootSchedule]);
+  }, [settings.rebootScheduleEnabled, settings.rebootSchedule]);
 
   // 保存済みのハードウェア音量(ALSA)を起動時に端末へ反映する。
   // ALSA のミキサー状態は再起動で失われる場合があるため、アプリ側でも保証する。
@@ -124,9 +140,11 @@ function MainScreen() {
         <MemberListPanel mode={authMode} setMode={setAuthMode} />
         <FaceAuthPanel
           onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenExternalSite={() => setIsExternalSiteOpen(true)}
           mode={authMode}
           setMode={setAuthMode}
-          isInteractive={!isSettingsOpen && !isScreenDimmed}
+          isInteractive={!isSettingsOpen && !isExternalSiteOpen && !isScreenDimmed}
+          onFaceSeen={reportPresence}
         />
       </div>
 
@@ -136,7 +154,9 @@ function MainScreen() {
         </p>
       )}
 
-      <AttendanceActionSheet isInteractive={!isSettingsOpen && !isScreenDimmed} />
+      <AttendanceActionSheet
+        isInteractive={!isSettingsOpen && !isExternalSiteOpen && !isScreenDimmed}
+      />
 
       {isSettingsOpen && (
         <Suspense
@@ -149,6 +169,21 @@ function MainScreen() {
           <SettingsPage onClose={() => setIsSettingsOpen(false)} />
         </Suspense>
       )}
+
+      {isExternalSiteOpen && (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950 text-sm text-slate-300">
+              外部サイトを読み込んでいます…
+            </div>
+          }
+        >
+          <ExternalSitePage onClose={() => setIsExternalSiteOpen(false)} />
+        </Suspense>
+      )}
+
+      {/* 人物不在時の半減光(完全消灯の黒レイヤー z-200 より下) */}
+      <PresenceDimOverlay isDim={isPresenceDim} />
 
       <ScreenDimmer onDimmedChange={setIsScreenDimmed} />
     </main>
