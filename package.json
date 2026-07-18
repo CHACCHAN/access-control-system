@@ -1,7 +1,7 @@
 {
   "name": "access-control-system",
   "private": true,
-  "version": "0.2.36",
+  "version": "0.2.43",
   "description": "顔認証とジェスチャーに対応した研究室向け在室管理キオスク",
   "license": "MIT",
   "author": "Yuya Nakayama",
@@ -28,7 +28,7 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.3",
     "tailwindcss": "^4.3.2",
-    "typescript": "~6.0.3",
+    "typescript": "~7.0.2",
     "vite": "^8.1.3"
   }
 }

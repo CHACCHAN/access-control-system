@@ -284,6 +284,7 @@ pub async fn recognize_face(
     match_faces: Option<bool>,
     include_landmarks: Option<bool>,
     min_match_face_width_ratio: Option<f32>,
+    overlay_recognized: Option<bool>,
 ) -> Result<FaceAuthResult, String> {
     let state = state.inner().clone();
     let shared = frame_state.inner().clone();
@@ -419,11 +420,14 @@ pub async fn recognize_face(
             }
         }
 
-        // 検出結果をオーバーレイ状態へ(カメラキャプチャがフレームへ焼き込む)
+        // 検出結果をオーバーレイ状態へ(カメラキャプチャがフレームへ焼き込む)。
+        // 確認カード表示中は照合を省略する(match_faces=false)ため recognized が
+        // 常に false になり、本人特定済みなのに枠が緑→シアンへ戻ってしまう。
+        // フロントが「特定済み」を明示した場合は緑の枠を維持する。
         overlay.set_face(FaceOverlay {
             bbox: best_bbox,
             landmarks,
-            recognized: result.recognized,
+            recognized: result.recognized || overlay_recognized.unwrap_or(false),
         });
 
         if cfg!(debug_assertions) {

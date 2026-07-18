@@ -35,9 +35,13 @@ Bun.serve({
   hostname: "127.0.0.1",
   port: PROXY_PORT,
   async fetch(req) {
-    // CORS プリフライト
+    // CORS プリフライト。外部サイト設定で任意のヘッダー(X-Api-Key 等)を
+    // 付与できるため、要求されたヘッダーをそのまま許可して転送に通す。
     if (req.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+      const requestedHeaders = req.headers.get("access-control-request-headers");
+      const headers = { ...CORS_HEADERS };
+      if (requestedHeaders) headers["Access-Control-Allow-Headers"] = requestedHeaders;
+      return new Response(null, { status: 204, headers });
     }
 
     const target = new URL(req.url).searchParams.get("url");

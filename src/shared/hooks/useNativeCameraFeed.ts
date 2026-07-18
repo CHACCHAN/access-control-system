@@ -1,72 +1,63 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { CameraStatus } from "./useCamera";
 
-interface CameraFramePayload {
-  imageData: string;
-}
-
 interface UseNativeCameraFeedResult {
-  /** 表示バッファA(互換のため mediaRef としても使う) */
-  imgRef: RefObject<HTMLImageElement | null>;
-  /** 表示バッファB(ダブルバッファの裏面) */
-  imgBufferRef: RefObject<HTMLImageElement | null>;
+  /** 表示先の canvas(useNativeCameraFeed がフレームを描画する) */
+  canvasRef: RefObject<HTMLCanvasElement | null>;
   status: CameraStatus;
   error: string | null;
 }
 
 const CAMERA_RESTART_DELAY_MS = 5000;
 
-// StrictModeのsetup→cleanup→setupを含め、同じWebViewからのstart/stop IPCを
-// 必ず発行順に完了させる。Boot診断側もstop完了をawaitしてから本画面へ進む。
+// StrictModeのsetup→cleanup→setupを含め、同じWebViewからのカメラ関連IPC
+// (受信チャンネル登録・start/stop)を必ず発行順に完了させる。チャンネル登録を
+// このキューの外で行うと、再マウント時に「古いマウントの登録が新しい登録を
+// 追い越して上書きし、フレームが二度と届かない」レースが起こり得る。
+// Boot診断側もstop完了をawaitしてから本画面へ進む。
 let cameraLifecycleQueue: Promise<void> = Promise.resolve();
 
-function enqueueCameraLifecycle(command: "start_camera_capture" | "stop_camera_capture") {
-  const operation = cameraLifecycleQueue.then(() => invoke<void>(command));
-  cameraLifecycleQueue = operation.catch(() => {});
-  return operation;
+function enqueueCameraIpc(operation: () => Promise<void>): Promise<void> {
+  const run = cameraLifecycleQueue.then(operation);
+  cameraLifecycleQueue = run.catch(() => {});
+  return run;
 }
 
 /**
  * WebKitGTK 経由の getUserMedia() がこのキオスク環境(PipeWire 未整備)では
- * 機能しないため、Rust 側が v4l2 から直接取得したフレームを `camera-frame`
- * イベントで受け取り、<img> に反映するフック。
+ * 機能しないため、Rust 側が v4l2 から取得・JPEG 化したフレームを Tauri Channel
+ * 経由の**バイナリ(ArrayBuffer)のまま**受け取り、createImageBitmap で
+ * デコードして canvas に描画するフック。
  *
- * ちらつき対策として <img> 2枚のダブルバッファで表示する:
- * 新しいフレームは常に「裏」の img へ読み込み、decode() の完了(描画準備済み)を
- * 待ってから表裏の不透明度を入れ替える。表示中の img の src を直接差し替えると
- * デコードが終わるまでの間に空白が見えて点滅するため、旧フレームを見せ続けたまま
- * 切り替えるのが目的。
+ * 旧方式(base64 文字列の Tauri イベント + <img> のダブルバッファ)は、
+ * フレームごとに base64 エンコード(Rust)→ JSON 文字列化 → base64 デコード
+ * (WebView)が走り CPU 負荷が大きかった。Channel の Raw 送信は IPC の
+ * カスタムプロトコルでバイナリのまま届き、canvas への drawImage は描画準備
+ * 済みのビットマップを一括転送するため、点滅対策のダブルバッファも不要になる。
  *
  * 検出処理(呼び出し側)がフレーム到着ペースより遅くても古いフレームが
  * 溜まらないよう、常に「最後に届いたフレームだけ」を適用する。
  */
 export function useNativeCameraFeed(): UseNativeCameraFeedResult {
-  const imgRef = useRef<HTMLImageElement | null>(null);
-  const imgBufferRef = useRef<HTMLImageElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [status, setStatus] = useState<CameraStatus>("idle");
   const [error, setError] = useState<string | null>(null);
 
-  const latestFrameRef = useRef<string | null>(null);
-  const appliedFrameRef = useRef<string | null>(null);
+  const latestFrameRef = useRef<ArrayBuffer | null>(null);
+  const appliedFrameRef = useRef<ArrayBuffer | null>(null);
   const applyingRef = useRef(false);
   const streamingRef = useRef(false);
-  /** バッファA(imgRef)が現在「表」かどうか */
-  const frontIsARef = useRef(true);
 
   useEffect(() => {
     let cancelled = false;
-    let unlistenFrame: UnlistenFn | undefined;
     let unlistenError: UnlistenFn | undefined;
     let restartTimer: number | null = null;
     latestFrameRef.current = null;
     appliedFrameRef.current = null;
     streamingRef.current = false;
-    frontIsARef.current = true;
     setError(null);
-    if (imgRef.current) imgRef.current.style.opacity = "1";
-    if (imgBufferRef.current) imgBufferRef.current.style.opacity = "0";
 
     async function applyLatestFrame() {
       if (applyingRef.current) return;
@@ -76,24 +67,28 @@ export function useNativeCameraFeed(): UseNativeCameraFeedResult {
         // 見るループにすることで、古いフレームの適用を自然に読み飛ばす。
         while (!cancelled) {
           const frame = latestFrameRef.current;
-          const imgA = imgRef.current;
-          const imgB = imgBufferRef.current;
-          if (!frame || !imgA || !imgB || frame === appliedFrameRef.current) break;
+          const canvas = canvasRef.current;
+          if (!frame || !canvas || frame === appliedFrameRef.current) break;
+          // デコードに失敗するフレーム(転送途中の破損等)を繰り返し
+          // 処理しないよう、成否に関わらず適用済み扱いにして次を待つ。
+          appliedFrameRef.current = frame;
 
-          const front = frontIsARef.current ? imgA : imgB;
-          const back = frontIsARef.current ? imgB : imgA;
-
-          back.src = `data:image/jpeg;base64,${frame}`;
+          let bitmap: ImageBitmap;
           try {
-            await back.decode();
+            bitmap = await createImageBitmap(new Blob([frame], { type: "image/jpeg" }));
           } catch {
+            continue;
+          }
+          if (cancelled) {
+            bitmap.close();
             break;
           }
-          // 描画準備が完了してから表裏を入れ替える(旧フレームはそれまで表示され続ける)
-          back.style.opacity = "1";
-          front.style.opacity = "0";
-          frontIsARef.current = !frontIsARef.current;
-          appliedFrameRef.current = frame;
+          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+          }
+          canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+          bitmap.close();
           if (!streamingRef.current) {
             streamingRef.current = true;
             setError(null);
@@ -111,8 +106,8 @@ export function useNativeCameraFeed(): UseNativeCameraFeedResult {
         restartTimer = null;
         if (cancelled) return;
         setStatus("requesting");
-        void enqueueCameraLifecycle("stop_camera_capture")
-          .then(() => enqueueCameraLifecycle("start_camera_capture"))
+        void enqueueCameraIpc(() => invoke<void>("stop_camera_capture"))
+          .then(() => enqueueCameraIpc(() => invoke<void>("start_camera_capture")))
           .catch((err) => {
             if (cancelled) return;
             setError(err instanceof Error ? err.message : String(err));
@@ -125,16 +120,6 @@ export function useNativeCameraFeed(): UseNativeCameraFeedResult {
     async function start() {
       setStatus("requesting");
       try {
-        const stopListeningFrames = await listen<CameraFramePayload>("camera-frame", (event) => {
-          latestFrameRef.current = event.payload.imageData;
-          void applyLatestFrame();
-        });
-        if (cancelled) {
-          stopListeningFrames();
-          return;
-        }
-        unlistenFrame = stopListeningFrames;
-
         const stopListeningErrors = await listen<string>("camera-error", (event) => {
           if (cancelled) return;
           setError(event.payload);
@@ -148,7 +133,22 @@ export function useNativeCameraFeed(): UseNativeCameraFeedResult {
         }
         unlistenError = stopListeningErrors;
 
-        await enqueueCameraLifecycle("start_camera_capture");
+        // 受信チャンネルをキャプチャ開始前に登録し、最初のフレームから受け取る。
+        // 再マウント時は新しいチャンネルで Rust 側の登録が上書きされる。
+        // 登録もキュー経由にして、他マウントの登録・start/stop と順序が
+        // 入れ替わらないようにする。
+        const frameChannel = new Channel<ArrayBuffer>();
+        frameChannel.onmessage = (frame) => {
+          if (cancelled) return;
+          latestFrameRef.current = frame;
+          void applyLatestFrame();
+        };
+        await enqueueCameraIpc(() =>
+          invoke<void>("set_camera_frame_channel", { channel: frameChannel }),
+        );
+        if (cancelled) return;
+
+        await enqueueCameraIpc(() => invoke<void>("start_camera_capture"));
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : String(err));
@@ -163,12 +163,11 @@ export function useNativeCameraFeed(): UseNativeCameraFeedResult {
 
     return () => {
       cancelled = true;
-      unlistenFrame?.();
       unlistenError?.();
       if (restartTimer !== null) window.clearTimeout(restartTimer);
-      void enqueueCameraLifecycle("stop_camera_capture").catch(() => {});
+      void enqueueCameraIpc(() => invoke<void>("stop_camera_capture")).catch(() => {});
     };
   }, []);
 
-  return { imgRef, imgBufferRef, status, error };
+  return { canvasRef, status, error };
 }

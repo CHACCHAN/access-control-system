@@ -1,6 +1,6 @@
 [package]
 name = "access-control-system"
-version = "0.2.36"
+version = "0.2.43"
 description = "Laboratory attendance kiosk with face and gesture recognition"
 authors = ["Yuya Nakayama"]
 license = "MIT"
@@ -31,6 +31,12 @@ tauri-plugin-http = "2"
 sysinfo = "0.39.5"
 if-addrs = "0.15.0"
 
+# UI 効果音の再生。WebKitGTK の HTMLAudioElement は環境によって無音になる
+# (カスタムスキームからのメディア取得や PipeWire 接続の問題)ため、カメラと
+# 同様に音声もRust側で処理する。ALSA(cpal)経由で出力し、mp3 は symphonia
+# でデコードする。
+rodio = { version = "0.21", default-features = false, features = ["playback", "mp3"] }
+
 # 顔検出・顔認証・ジェスチャー認識のONNX推論(全てRust側で完結させる)。
 # `load-dynamic` で libonnxruntime.so を実行時に dlopen する方式を採る:
 # - pyke CDN の静的リンク版は glibc 2.38+ を要求し、devcontainer
@@ -45,9 +51,9 @@ ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "
 # 合わせる必要がある(0.17系)。
 ndarray = "0.17"
 
-# nokhwa/image/base64 は、WebKitGTK 経由の getUserMedia() が本キオスク環境
+# nokhwa/image は、WebKitGTK 経由の getUserMedia() が本キオスク環境
 # (PipeWire 未整備)では動作しないため、v4l2 を直接叩いてカメラフレームを
-# 取得し JPEG エンコードして Tauri イベントで渡す代替経路のために使用する。
+# 取得し JPEG エンコードして Tauri Channel で渡す代替経路のために使用する。
 # ビルドには libclang-dev / libv4l-dev が必要(nokhwa の v4l2 バインディングが
 # bindgen 経由でヘッダーを読むため)。
 [target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
@@ -57,4 +63,3 @@ nokhwa = { version = "0.10", features = ["input-native"] }
 # nokhwa が内部で同バージョンを使用しているため依存追加コストはほぼ無い。
 v4l = "0.14"
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
-base64 = "0.22"

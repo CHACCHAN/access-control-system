@@ -5,6 +5,7 @@ import { ATTENDANCE_STATUSES, STATUS_STYLE } from "@/entities/member/statusStyle
 import { useSettings } from "@/shared/hooks/useSettings";
 import { playUiSound } from "@/shared/lib/uiSound";
 import { GestureGuide } from "@/features/gesture/GestureGuide";
+import { GestureCountdown } from "@/features/gesture/GestureCountdown";
 import { useGestureStatusLoop } from "@/features/gesture/useGestureStatusLoop";
 import { postAttendance } from "@/entities/member/attendanceApi";
 import { CheckIcon, CloseIcon } from "@/shared/ui/icons";
@@ -50,9 +51,12 @@ export function AttendanceActionSheet({ isInteractive = true }: { isInteractive?
   // シート表示中(手動選択で開いた場合=顔認証で特定されていない人も含む)は
   // ジェスチャー操作を受け付ける。このシート表示中は顔認証ループが停止して
   // いるため、CPU(i7-3770想定)を取り合うことはない。
-  const { detectedGesture } = useGestureStatusLoop({
-    active: isInteractive && member !== null && !busy,
+  // 送信中(pendingAction)も active を維持し、多重実行は handleAction 側で弾く
+  // (active を落とすとループ再起動で発火済みガードが外れ、再送になり得る)。
+  const { detectedGesture, countdown } = useGestureStatusLoop({
+    active: isInteractive && member !== null && completedAction === null,
     onStatus: (status) => handleActionRef.current(status),
+    unavailableStatus: member?.status ?? null,
   });
 
   if (!member) return null;
@@ -168,10 +172,15 @@ export function AttendanceActionSheet({ isInteractive = true }: { isInteractive?
             )}
 
             <div className="mt-5">
-              <GestureGuide
-                detectedGesture={detectedGesture}
-                title="カメラに手をかざすと、ジェスチャーでも記録できます"
-              />
+              {countdown ? (
+                <GestureCountdown countdown={countdown} />
+              ) : (
+                <GestureGuide
+                  detectedGesture={detectedGesture}
+                  title="カメラに手をかざすと、ジェスチャーでも記録できます"
+                  unavailableStatus={member.status}
+                />
+              )}
             </div>
           </>
         )}

@@ -48,16 +48,35 @@ export const DEFAULT_GESTURE_STATUS_MAP: GestureStatusMap = {
 export type RejectGesture = "ThumbsDown" | "";
 export const DEFAULT_REJECT_GESTURE: RejectGesture = "ThumbsDown";
 
+// ジェスチャー確定から在室状況の送信までのカウントダウン秒数。
+// 認識後すぐ送信せず「3→2→1」の表示を挟むことで、誤認識時に手を下ろして
+// キャンセルできる猶予を作る。0 は従来どおりの即時送信。
+export const GESTURE_COUNTDOWN_MIN = 0;
+export const GESTURE_COUNTDOWN_MAX = 10;
+export const GESTURE_COUNTDOWN_DEFAULT = 3;
+
+// 外部サイトのページ取得時に付与する任意の HTTP ヘッダー(認証トークン等)。
+// ページ本体の取得とリンク・フォームの遷移(すべてサーバサイド経由)に適用される。
+// CSS・画像などのサブリソースはブラウザが直接読むため対象外。
+export interface ExternalSiteHeader {
+  name: string;
+  value: string;
+}
+
 // 外部サイト(ポータル・Wiki・スケジュール表など)。トップ画面の地球儀ボタン
 // からアプリ内ブラウザ(サーバサイド取得型)で開く。
 export interface ExternalSite {
   /** 一覧に表示する名前(空なら URL のホスト名を表示) */
   name: string;
   url: string;
+  /** ページ取得時に付与する HTTP ヘッダー(任意) */
+  headers: ExternalSiteHeader[];
 }
 
 /** 登録できる外部サイトの上限(設定画面・正規化の両方で使う) */
 export const MAX_EXTERNAL_SITES = 12;
+/** 1サイトに登録できる HTTP ヘッダーの上限 */
+export const MAX_SITE_HEADERS = 8;
 
 // パフォーマンス調整。推論のポーリング間隔やカメラ配信のパラメータを
 // 端末スペックに合わせて設定画面から調整できるようにする。
@@ -212,6 +231,8 @@ export interface AppSettings {
   gestureStatusMap: GestureStatusMap;
   // 確認カードで「ちがう」を意味するジェスチャー("" は無効)
   rejectGesture: RejectGesture;
+  // ジェスチャー確定から送信までのカウントダウン秒数(0で即時送信)
+  gestureCountdownSeconds: number;
   // 推論間隔・カメラ配信・照合パラメータの調整
   performance: PerformanceSettings;
   // アクセントカラー・背景・レイアウトのカスタマイズ
@@ -239,9 +260,23 @@ export const DEFAULT_SETTINGS: AppSettings = {
   wsSignalValue: "update",
   gestureStatusMap: DEFAULT_GESTURE_STATUS_MAP,
   rejectGesture: DEFAULT_REJECT_GESTURE,
+  gestureCountdownSeconds: GESTURE_COUNTDOWN_DEFAULT,
   performance: DEFAULT_PERFORMANCE,
   appearance: DEFAULT_APPEARANCE,
 };
+
+/** 外部サイトの HTTP ヘッダー一覧の正規化(名前が空の行・不正型は除去)。 */
+function normalizeSiteHeaders(raw: unknown): ExternalSiteHeader[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((header): header is Record<string, unknown> => !!header && typeof header === "object")
+    .map((header) => ({
+      name: typeof header.name === "string" ? header.name.trim() : "",
+      value: typeof header.value === "string" ? header.value : "",
+    }))
+    .filter((header) => header.name !== "")
+    .slice(0, MAX_SITE_HEADERS);
+}
 
 /** 外部サイト一覧の正規化。旧設定(単一の portalUrl)からの移行も行う。 */
 function normalizeExternalSites(stored: Partial<AppSettings>): ExternalSite[] {
@@ -252,6 +287,7 @@ function normalizeExternalSites(stored: Partial<AppSettings>): ExternalSite[] {
     .map((site) => ({
       name: typeof site.name === "string" ? site.name : "",
       url: typeof site.url === "string" ? site.url : "",
+      headers: normalizeSiteHeaders(site.headers),
     }))
     // 完全な空行は保存しない(編集途中の行を残さない)
     .filter((site) => site.name.trim() !== "" || site.url.trim() !== "")
@@ -260,7 +296,7 @@ function normalizeExternalSites(stored: Partial<AppSettings>): ExternalSite[] {
   // 旧バージョンの portalUrl(単一URL)からの移行
   const legacyPortalUrl = (stored as { portalUrl?: unknown }).portalUrl;
   if (sites.length === 0 && typeof legacyPortalUrl === "string" && legacyPortalUrl.trim() !== "") {
-    sites.push({ name: "ポータルサイト", url: legacyPortalUrl });
+    sites.push({ name: "ポータルサイト", url: legacyPortalUrl, headers: [] });
   }
   return sites;
 }
@@ -362,6 +398,13 @@ export function normalizeSettings(value: unknown): AppSettings {
       stored.rejectGesture === "" || stored.rejectGesture === "ThumbsDown"
         ? stored.rejectGesture
         : DEFAULT_REJECT_GESTURE,
+    gestureCountdownSeconds: finiteInRange(
+      stored.gestureCountdownSeconds,
+      GESTURE_COUNTDOWN_DEFAULT,
+      GESTURE_COUNTDOWN_MIN,
+      GESTURE_COUNTDOWN_MAX,
+      true,
+    ),
     performance: {
       recognitionIntervalMs: finiteInRange(
         perf.recognitionIntervalMs,
@@ -370,11 +413,12 @@ export function normalizeSettings(value: unknown): AppSettings {
         5000,
         true,
       ),
+      // 0 は無制限(自動確定しない)。上限は実質無制限(入力ミス対策の 9999 のみ)
       recognitionStableCount: finiteInRange(
         perf.recognitionStableCount,
         DEFAULT_PERFORMANCE.recognitionStableCount,
-        1,
-        5,
+        0,
+        9999,
         true,
       ),
       gesturePollIntervalMs: finiteInRange(
@@ -384,11 +428,12 @@ export function normalizeSettings(value: unknown): AppSettings {
         5000,
         true,
       ),
+      // 0 は無制限(ジェスチャーでは更新しない)。上限は入力ミス対策の 9999 のみ
       gestureStableCount: finiteInRange(
         perf.gestureStableCount,
         DEFAULT_PERFORMANCE.gestureStableCount,
-        1,
-        5,
+        0,
+        9999,
         true,
       ),
       cameraFrameIntervalMs: finiteInRange(
@@ -486,7 +531,10 @@ function cloneSettings(settings: AppSettings): AppSettings {
     gestureStatusMap: { ...settings.gestureStatusMap },
     performance: { ...settings.performance },
     appearance: { ...settings.appearance },
-    externalSites: settings.externalSites.map((site) => ({ ...site })),
+    externalSites: settings.externalSites.map((site) => ({
+      ...site,
+      headers: site.headers.map((header) => ({ ...header })),
+    })),
   };
 }
 

@@ -1,7 +1,9 @@
 // WebKitGTK(Linux 版 Tauri の webview)は getUserMedia() 経由のカメラ取得が
 // この端末(PipeWire 未整備のミニマル startx キオスク環境)では機能しない
-// ことが判明したため、v4l2 を直接叩いてフレームを取得し、Tauri イベント
-// (`camera-frame` / `camera-error`)でフロントエンドへ渡す代替経路を提供する。
+// ことが判明したため、v4l2 を直接叩いてフレームを取得してフロントエンドへ渡す
+// 代替経路を提供する。表示フレームは Tauri Channel へ JPEG バイナリのまま送り
+// (base64 文字列イベントの JSON 化・二重デコードを避ける)、エラー通知のみ
+// 低頻度な `camera-error` イベントを使う。
 use image::codecs::jpeg::JpegEncoder;
 use nokhwa::{
     pixel_format::RgbFormat,
@@ -10,11 +12,11 @@ use nokhwa::{
     },
     Camera,
 };
-use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::vision::OverlayState;
@@ -38,12 +40,6 @@ const PERF_RELOAD_INTERVAL: Duration = Duration::from_secs(2);
 // デコードは不要。この間隔まで間引いて消灯中の CPU 使用率・発熱を抑える。
 const PAUSED_DECODE_INTERVAL: Duration = Duration::from_millis(500);
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CameraFramePayload {
-    image_data: String,
-}
-
 /// 推論(顔認証・ジェスチャー認識)用に共有する最新のデコード済みフレーム。
 /// フロントへ送る JPEG とは別に、キャプチャスレッドが毎フレーム上書きする。
 /// 推論側はフロントの表示ペースと独立に「その時点の最新フレーム」を読む。
@@ -66,9 +62,13 @@ struct CaptureHandle {
 #[derive(Default)]
 struct CameraCaptureInner {
     handle: Mutex<Option<CaptureHandle>>,
-    /// 画面消灯中はフロントへの配信(JPEG化・emit)を止め、デコードも間引く。
+    /// 画面消灯中はフロントへの配信(JPEG化・送信)を止め、デコードも間引く。
     /// 推論用の SharedFrame 更新(間引き後)と人感復帰は影響を受けない。
     emit_paused: AtomicBool,
+    /// 表示フレーム(JPEG バイナリ)の送信先チャンネル。WebView 側が
+    /// `set_camera_frame_channel` で登録し、リロード・再マウント時は新しい
+    /// チャンネルで上書きされる。未登録の間は表示用の処理自体を省く。
+    frame_channel: Mutex<Option<Channel<InvokeResponseBody>>>,
 }
 
 /// Arc で包み、コマンド側が spawn_blocking へ clone して渡せるようにする。
@@ -170,6 +170,25 @@ fn stop_capture_blocking(state: &CameraCaptureState) -> Result<(), String> {
     Ok(())
 }
 
+/// フロントの映像受信チャンネルを登録する。表示フレームは base64 イベントでは
+/// なくこの Channel へ JPEG バイナリ(Raw)のまま送ることで、IPC の JSON 文字列化と
+/// base64 エンコード/デコード(Rust・WebView の両側)を省き、CPU 負荷を抑える。
+/// キャプチャの開始・停止(start/stop_camera_capture)とは独立しており、
+/// 先に登録しておけばキャプチャ開始直後のフレームから受信できる。
+#[tauri::command]
+pub fn set_camera_frame_channel(
+    state: State<'_, CameraCaptureState>,
+    channel: Channel<InvokeResponseBody>,
+) -> Result<(), String> {
+    let mut guard = state
+        .0
+        .frame_channel
+        .lock()
+        .map_err(|_| "内部状態のロックに失敗しました".to_string())?;
+    *guard = Some(channel);
+    Ok(())
+}
+
 /// 画面消灯中のフロント配信を一時停止/再開する(ScreenDimmer から呼ぶ)。
 /// 停止中もカメラは掴んだままで、人感復帰用の SharedFrame 更新は間引いて継続する。
 #[tauri::command]
@@ -219,6 +238,78 @@ struct ProbedFormat {
     fps: u32,
 }
 
+// nokhwa の Linux バックエンドは、カメラを開く際に「デバイスの現在の
+// フレーム間隔」を読み、その分子が 1 でないと
+// 「Could not get device property V4L2 FrameRate: Framerate not whole number」
+// で失敗する(どのフォーマット候補を要求しても通る場所にある)。
+// UVC カメラ(iMac の FaceTime HD 等)はドライバがフレーム間隔を
+// 29.97fps(1001/30000)や 100ns 単位の生値(333333/10000000)のような
+// 分数で報告することがあるため、nokhwa へ渡す前に S_PARM で
+// 整数 fps(分子 1)へ正規化しておく。
+fn normalize_device_framerate(index: u32) {
+    use v4l::video::Capture;
+
+    let Ok(device) = v4l::Device::new(index as usize) else {
+        return;
+    };
+    let Ok(params) = Capture::params(&device) else {
+        return;
+    };
+    let interval = params.interval;
+    // 分子 1(整数 fps)なら nokhwa がそのまま受け付ける
+    if interval.numerator <= 1 || interval.denominator == 0 {
+        return;
+    }
+
+    // 現在値に最も近い整数 fps を第一候補に、デバイスが列挙する離散
+    // インターバル由来の整数 fps を「現在値に近い順」で続ける
+    let current_fps = (f64::from(interval.denominator) / f64::from(interval.numerator))
+        .round()
+        .max(1.0) as u32;
+    let mut candidates = vec![current_fps];
+    if let Ok(format) = Capture::format(&device) {
+        if let Ok(intervals) =
+            Capture::enum_frameintervals(&device, format.fourcc, format.width, format.height)
+        {
+            let mut listed: Vec<u32> = intervals
+                .iter()
+                .filter_map(|fi| match &fi.interval {
+                    v4l::frameinterval::FrameIntervalEnum::Discrete(f) if f.numerator > 0 => {
+                        let fps =
+                            (f64::from(f.denominator) / f64::from(f.numerator)).round() as u32;
+                        (fps > 0).then_some(fps)
+                    }
+                    _ => None,
+                })
+                .collect();
+            listed.sort_by_key(|fps| u32::abs_diff(*fps, current_fps));
+            candidates.extend(listed);
+        }
+    }
+    candidates.dedup();
+
+    for fps in candidates {
+        if Capture::set_params(&device, &v4l::video::capture::Parameters::with_fps(fps)).is_err() {
+            continue;
+        }
+        // ドライバが丸めた実際の値を読み直し、分子 1 になったことを確認する
+        if let Ok(applied) = Capture::params(&device) {
+            if applied.interval.numerator == 1 && applied.interval.denominator > 0 {
+                eprintln!(
+                    "[camera-capture] フレームレートを整数値へ正規化: {}/{} → 1/{}",
+                    interval.numerator, interval.denominator, applied.interval.denominator
+                );
+                return;
+            }
+        }
+    }
+    eprintln!(
+        "[camera-capture] フレームレートを整数値へ正規化できませんでした(現在 {}/{})。\
+         このカメラは nokhwa が開けない可能性があります",
+        interval.numerator, interval.denominator
+    );
+}
+
 fn probe_current_format(index: u32) -> Option<ProbedFormat> {
     use v4l::video::Capture;
 
@@ -227,10 +318,15 @@ fn probe_current_format(index: u32) -> Option<ProbedFormat> {
     let fps = Capture::params(&device)
         .ok()
         .and_then(|p| {
-            // interval は 1フレームあたりの時間(例: 1/30 秒 → 30fps)
-            p.interval.denominator.checked_div(p.interval.numerator)
+            // interval は 1フレームあたりの時間(例: 1/30 秒 → 30fps)。
+            // 正規化後も分数表現が残る場合に備え、四捨五入で整数 fps を求める
+            if p.interval.numerator == 0 {
+                return None;
+            }
+            let fps = (f64::from(p.interval.denominator) / f64::from(p.interval.numerator))
+                .round() as u32;
+            (fps > 0).then_some(fps)
         })
-        .filter(|fps| *fps > 0)
         .unwrap_or(30);
 
     Some(ProbedFormat {
@@ -271,6 +367,12 @@ fn open_first_available_camera() -> Result<Camera, String> {
     let mut last_err = String::new();
     for info in &devices {
         let mut candidates = format_candidates();
+
+        // 分数フレームレート(iMac の FaceTime HD 等)のままだと nokhwa が
+        // どの候補でも開けないため、開く前に整数 fps へ正規化しておく。
+        if let Ok(device_index) = info.index().as_index() {
+            normalize_device_framerate(device_index);
+        }
 
         // 現在の出力フォーマットに完全一致する Exact 要求を最後の砦として足す。
         // Exact はデバイスのフォーマット列挙を参照しない(nokhwa の実装上、要求を
@@ -411,7 +513,14 @@ fn run_capture_loop(
         // SharedFrame の鮮度はその間隔で十分)。フレーム自体は取得し続けて
         // カメラのストリームは止めない。
         let paused = capture_state.emit_paused.load(Ordering::SeqCst);
+        // 受信チャンネル未登録の間は届け先が無いため、表示用コピー・JPEG化ごと省く
+        let has_receiver = capture_state
+            .frame_channel
+            .lock()
+            .map(|guard| guard.is_some())
+            .unwrap_or(false);
         let should_emit = !paused
+            && has_receiver
             && last_frame_emit
                 .map(|last| last.elapsed() >= emit_interval)
                 .unwrap_or(true);
@@ -434,9 +543,15 @@ fn run_capture_loop(
                 // 使い切らないよう、表示フレームとして選んだ時点で間隔を更新する。
                 last_frame_emit = Some(Instant::now());
                 match encode_display_frame(display_frame, overlay, jpeg_quality) {
-                    Ok(image_data) => {
+                    Ok(jpeg_bytes) => {
                         consecutive_encode_errors = 0;
-                        let _ = app.emit("camera-frame", CameraFramePayload { image_data });
+                        // 送信失敗(WebView リロード直後の旧チャンネル等)は、次の
+                        // チャンネル登録で自然に回復するため握りつぶす。
+                        if let Ok(guard) = capture_state.frame_channel.lock() {
+                            if let Some(channel) = guard.as_ref() {
+                                let _ = channel.send(InvokeResponseBody::Raw(jpeg_bytes));
+                            }
+                        }
                     }
                     Err(e) => {
                         consecutive_encode_errors += 1;
@@ -520,9 +635,7 @@ fn encode_display_frame(
     mut frame: DisplayFrame,
     overlay: &OverlayState,
     jpeg_quality: u8,
-) -> Result<String, String> {
-    use base64::Engine;
-
+) -> Result<Vec<u8>, String> {
     // フロント表示用フレームには検出結果(顔枠・ランドマーク・手の骨格)を
     // Rust 側で直接焼き込む。フロントは焼き込み済みのフレームを表示するだけ。
     overlay.render(&mut frame.rgb, frame.width as usize, frame.height as usize);
@@ -533,6 +646,5 @@ fn encode_display_frame(
     JpegEncoder::new_with_quality(&mut jpeg_bytes, jpeg_quality)
         .encode_image(&img)
         .map_err(|e| e.to_string())?;
-
-    Ok(base64::engine::general_purpose::STANDARD.encode(&jpeg_bytes))
+    Ok(jpeg_bytes)
 }

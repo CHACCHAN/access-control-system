@@ -35,9 +35,9 @@ const RECOGNITION_FIELDS: NumFieldDef[] = [
   {
     key: "recognitionStableCount",
     label: "顔認証の連続一致回数",
-    hint: "同一人物がこの回数連続で認識されたときだけ確認カードを表示します(誤認識防止)",
-    min: 1,
-    max: 5,
+    hint: "同一人物がこの回数連続で認識されたときだけ確認カードを表示します(誤認識防止)。0で無制限(自動確定しない)",
+    min: 0,
+    max: 9999,
     step: 1,
   },
   {
@@ -78,9 +78,9 @@ const GESTURE_FIELDS: NumFieldDef[] = [
   {
     key: "gestureStableCount",
     label: "ジェスチャーの連続一致回数",
-    hint: "同じ手の形がこの回数連続したときだけステータスを更新します(誤爆防止)",
-    min: 1,
-    max: 5,
+    hint: "同じ手の形がこの回数連続したときだけステータスを更新します(誤爆防止)。0で無制限(ジェスチャーでは更新しない)",
+    min: 0,
+    max: 9999,
     step: 1,
   },
 ];

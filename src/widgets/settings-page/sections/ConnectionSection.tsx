@@ -1,7 +1,8 @@
 import type { Dispatch, SetStateAction } from "react";
-import { MAX_EXTERNAL_SITES, type AppSettings, type ExternalSite } from "@/shared/hooks/useSettings";
-import { CloseIcon, LinkIcon } from "@/shared/ui/icons";
+import { MAX_EXTERNAL_SITES, type AppSettings } from "@/shared/hooks/useSettings";
+import { LinkIcon } from "@/shared/ui/icons";
 import { Field, INPUT_CLASS, MONO_INPUT_CLASS, SectionHeader, SettingsCard } from "../fields";
+import { ExternalSitesField } from "./ExternalSitesField";
 
 interface SectionProps {
   draft: AppSettings;
@@ -87,73 +88,12 @@ export function ConnectionSection({ draft, setDraft }: SectionProps) {
         <div className="border-t border-dashed border-slate-200 pt-5 dark:border-white/10">
           <Field
             label="外部サイト"
-            hint={`トップ画面の地球儀ボタンから開くサイト(ポータル等)。複数登録すると一覧から選べます(最大${MAX_EXTERNAL_SITES}件)。サイト側のJavaScriptは実行されないため、通常のWebページ向けです`}
+            hint={`トップ画面の地球儀ボタンから開くサイト(ポータル等)。複数登録すると一覧から選べます(最大${MAX_EXTERNAL_SITES}件)。サイトごとに認証トークン等のHTTPヘッダーを付与できます。サイト側のJavaScriptは実行されないため、通常のWebページ向けです`}
           >
-            <div className="space-y-2">
-              {draft.externalSites.map((site, index) => (
-                <div key={index} className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={site.name}
-                    onChange={(e) => updateSite(index, { name: e.target.value })}
-                    placeholder="表示名"
-                    aria-label={`外部サイト${index + 1}の表示名`}
-                    className={`${INPUT_CLASS} w-36 shrink-0`}
-                  />
-                  <input
-                    type="text"
-                    value={site.url}
-                    onChange={(e) => updateSite(index, { url: e.target.value })}
-                    placeholder="https://portal.example.com"
-                    aria-label={`外部サイト${index + 1}のURL`}
-                    spellCheck={false}
-                    className={MONO_INPUT_CLASS}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeSite(index)}
-                    aria-label={`外部サイト${index + 1}を削除`}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-slate-500 transition hover:border-rose-400/60 hover:text-rose-500 dark:border-white/10 dark:text-slate-400 dark:hover:border-rose-400/50 dark:hover:text-rose-400"
-                  >
-                    <CloseIcon className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={addSite}
-                disabled={draft.externalSites.length >= MAX_EXTERNAL_SITES}
-                className="rounded-lg border border-dashed border-slate-300 px-4 py-2 text-xs font-medium text-slate-600 transition hover:border-cyan-500/50 hover:text-cyan-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/15 dark:text-slate-300 dark:hover:border-cyan-400/50 dark:hover:text-cyan-400"
-              >
-                + サイトを追加
-              </button>
-            </div>
+            <ExternalSitesField draft={draft} setDraft={setDraft} />
           </Field>
         </div>
       </div>
     </SettingsCard>
   );
-
-  function updateSite(index: number, patch: Partial<ExternalSite>) {
-    setDraft((d) => ({
-      ...d,
-      externalSites: d.externalSites.map((site, i) =>
-        i === index ? { ...site, ...patch } : site,
-      ),
-    }));
-  }
-
-  function removeSite(index: number) {
-    setDraft((d) => ({
-      ...d,
-      externalSites: d.externalSites.filter((_, i) => i !== index),
-    }));
-  }
-
-  function addSite() {
-    setDraft((d) => {
-      if (d.externalSites.length >= MAX_EXTERNAL_SITES) return d;
-      return { ...d, externalSites: [...d.externalSites, { name: "", url: "" }] };
-    });
-  }
 }

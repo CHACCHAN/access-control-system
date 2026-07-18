@@ -22,15 +22,14 @@ export interface EnrolledFace {
 }
 
 // 開発時(ブラウザ/webview上のデバッグ)は <video> + getUserMedia、実機(Tauri)は
-// Rust側がv4l2から取得したフレームを <img> で表示するため、要素の種類が異なる。
+// Rust側がv4l2から取得したフレーム(Channel経由のバイナリJPEG)を <canvas> へ
+// 描画するため、要素の種類が異なる。
 // どちらの場合も「表示専用」であり、検出・認識はRust側が独自にフレームを読む。
-export type FaceMediaElement = HTMLVideoElement | HTMLImageElement;
-export type FaceMediaKind = "video" | "img";
+export type FaceMediaElement = HTMLVideoElement | HTMLCanvasElement;
+export type FaceMediaKind = "video" | "canvas";
 
 interface FaceAuthContextValue {
   mediaRef: RefObject<FaceMediaElement | null>;
-  /** 実機(img)のみ: ちらつき対策のダブルバッファ裏面 */
-  mediaBufferRef?: RefObject<HTMLImageElement | null>;
   mediaKind: FaceMediaKind;
   cameraStatus: CameraStatus;
   cameraError: string | null;
@@ -45,7 +44,6 @@ const FaceAuthContext = createContext<FaceAuthContextValue | null>(null);
 
 interface CameraFeed {
   mediaRef: RefObject<FaceMediaElement | null>;
-  mediaBufferRef?: RefObject<HTMLImageElement | null>;
   mediaKind: FaceMediaKind;
   status: CameraStatus;
   error: string | null;
@@ -142,7 +140,6 @@ function FaceAuthProviderInner({
   const value = useMemo<FaceAuthContextValue>(
     () => ({
       mediaRef: camera.mediaRef,
-      mediaBufferRef: camera.mediaBufferRef,
       mediaKind: camera.mediaKind,
       cameraStatus: camera.status,
       cameraError: camera.error,
@@ -153,7 +150,6 @@ function FaceAuthProviderInner({
     }),
     [
       camera.mediaRef,
-      camera.mediaBufferRef,
       camera.mediaKind,
       camera.status,
       camera.error,
@@ -179,16 +175,10 @@ function BrowserFaceAuthProvider({ children }: { children: ReactNode }) {
 }
 
 function NativeFaceAuthProvider({ children }: { children: ReactNode }) {
-  const { imgRef, imgBufferRef, status, error } = useNativeCameraFeed();
+  const { canvasRef, status, error } = useNativeCameraFeed();
   return (
     <FaceAuthProviderInner
-      camera={{
-        mediaRef: imgRef,
-        mediaBufferRef: imgBufferRef,
-        mediaKind: "img",
-        status,
-        error,
-      }}
+      camera={{ mediaRef: canvasRef, mediaKind: "canvas", status, error }}
     >
       {children}
     </FaceAuthProviderInner>

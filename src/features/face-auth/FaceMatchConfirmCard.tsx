@@ -3,6 +3,8 @@ import type { AttendanceStatus, Member } from "@/entities/member/model";
 import type { GestureKind } from "@/shared/lib/visionApi";
 import { playUiSound } from "@/shared/lib/uiSound";
 import { GestureGuide } from "@/features/gesture/GestureGuide";
+import { GestureCountdown } from "@/features/gesture/GestureCountdown";
+import type { GestureCountdownState } from "@/features/gesture/useGestureStatusLoop";
 import { CheckIcon } from "@/shared/ui/icons";
 
 interface FaceMatchConfirmCardProps {
@@ -11,6 +13,8 @@ interface FaceMatchConfirmCardProps {
   onReject: () => void;
   /** 直近に検出されたジェスチャー(案内のハイライト用) */
   detectedGesture: GestureKind | null;
+  /** ジェスチャー確定後の送信カウントダウン(表示中は はい/ちがう を置き換える) */
+  countdown: GestureCountdownState | null;
   /** ジェスチャーで直接記録が完了したときのステータス(完了表示に切り替える) */
   completedAction: AttendanceStatus | null;
   busy?: boolean;
@@ -27,6 +31,7 @@ export function FaceMatchConfirmCard({
   onConfirm,
   onReject,
   detectedGesture,
+  countdown,
   completedAction,
   busy = false,
 }: FaceMatchConfirmCardProps) {
@@ -58,29 +63,40 @@ export function FaceMatchConfirmCard({
             <p className="mt-3 text-base font-semibold text-slate-900 dark:text-white">
               {member.name} さんですか？
             </p>
-            <div className="mt-4 flex gap-3">
-              <button
-                onClick={onReject}
-                disabled={busy}
-                className="flex-1 rounded-lg border border-slate-200 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/5"
-              >
-                ちがう
-              </button>
-              <button
-                onClick={onConfirm}
-                disabled={busy}
-                className="flex-1 rounded-lg bg-cyan-500 py-2.5 text-sm font-semibold text-slate-950 shadow-glow transition hover:bg-cyan-400"
-              >
-                はい
-              </button>
-            </div>
-            <div className="mt-4">
-              <GestureGuide
-                detectedGesture={detectedGesture}
-                title="ジェスチャーで直接記録、またはサムズダウンで「ちがう」を選べます"
-                includeReject
-              />
-            </div>
+            {countdown ? (
+              // ジェスチャー確定後は「はい/ちがう」をカウントダウン表示に置き換える。
+              // カウント中に手を下ろすとキャンセルされ、元の表示に戻る。
+              <div className="mt-2">
+                <GestureCountdown countdown={countdown} />
+              </div>
+            ) : (
+              <>
+                <div className="mt-4 flex gap-3">
+                  <button
+                    onClick={onReject}
+                    disabled={busy}
+                    className="flex-1 rounded-lg border border-slate-200 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/5"
+                  >
+                    ちがう
+                  </button>
+                  <button
+                    onClick={onConfirm}
+                    disabled={busy}
+                    className="flex-1 rounded-lg bg-cyan-500 py-2.5 text-sm font-semibold text-slate-950 shadow-glow transition hover:bg-cyan-400"
+                  >
+                    はい
+                  </button>
+                </div>
+                <div className="mt-4">
+                  <GestureGuide
+                    detectedGesture={detectedGesture}
+                    title="ジェスチャーで直接記録、またはサムズダウンで「ちがう」を選べます"
+                    includeReject
+                    unavailableStatus={member.status}
+                  />
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

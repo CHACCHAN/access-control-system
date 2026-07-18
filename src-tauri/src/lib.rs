@@ -4,6 +4,7 @@ use std::time::Instant;
 use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System};
 use tauri::State;
 
+mod audio;
 mod camera_capture;
 mod settings;
 mod vision;
@@ -323,7 +324,9 @@ pub fn run() {
         .manage(vision::OverlayState::default())
         .manage(vision::WakeWatchState::default())
         .manage(SystemStatsState::default())
+        .manage(audio::AudioState::default())
         .invoke_handler(tauri::generate_handler![
+            audio::play_ui_sound,
             shutdown_computer,
             restart_computer,
             exit_app,
@@ -335,6 +338,7 @@ pub fn run() {
             set_display_power,
             camera_capture::start_camera_capture,
             camera_capture::stop_camera_capture,
+            camera_capture::set_camera_frame_channel,
             camera_capture::set_camera_stream_paused,
             vision::init_vision,
             vision::init_face_vision,

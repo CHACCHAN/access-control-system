@@ -37,6 +37,20 @@ function siteDisplayName(site: ExternalSite): string {
   }
 }
 
+/**
+ * 設定されたサイト別 HTTP ヘッダー(認証トークン等)をリクエスト用に整形する。
+ * ページ本体の取得とリンク・フォーム遷移(サーバサイド経由の全リクエスト)に
+ * 適用される。CSS・画像などのサブリソースはブラウザが直接読むため対象外。
+ */
+function siteRequestHeaders(site: ExternalSite | null): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const header of site?.headers ?? []) {
+    const name = header.name.trim();
+    if (name) headers[name] = header.value;
+  }
+  return headers;
+}
+
 /** リダイレクト追跡後の最終URLを特定する(相対URL解決の基準)。 */
 function resolveFinalUrl(response: Response, requestedUrl: string): string {
   // 開発時の中継サーバは Response.url が中継URLになるため専用ヘッダーで受け取る
@@ -106,12 +120,13 @@ export function ExternalSitePage({ onClose }: ExternalSitePageProps) {
         url,
         {
           method,
-          ...(body
-            ? {
-                body: body.toString(),
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              }
-            : {}),
+          // サイト別の設定ヘッダーを常に付与する。フォームPOSTの Content-Type は
+          // 送信内容と一致させる必要があるため、設定側の指定より優先する。
+          headers: {
+            ...siteRequestHeaders(activeSite),
+            ...(body ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
+          },
+          ...(body ? { body: body.toString() } : {}),
         },
         SITE_FETCH_TIMEOUT_MS,
       );

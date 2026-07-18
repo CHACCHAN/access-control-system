@@ -14,6 +14,17 @@
 | 開発時(ブラウザ, `bun run dev`) | `http://localhost:8787/proxy?url=<本来のURL>` の中継サーバー経由 | 中継サーバーが回避 |
 | その他(vite preview 等) | ブラウザ標準 fetch(フォールバック) | 制約を受ける |
 
+```mermaid
+flowchart TD
+  req["httpFetch(url, init)"] --> env{"実行環境"}
+  env -- "実機(Tauri)" --> plugin["tauri-plugin-http<br>(Rust reqwest)"]
+  env -- "開発ブラウザ(bun run dev)" --> proxy["localhost:8787/proxy?url=…<br>中継サーバー(Bun)"]
+  env -- "その他(vite preview 等)" --> raw["ブラウザ標準 fetch"]
+  plugin --> target["外部 API / 外部サイト"]
+  proxy --> target
+  raw -- "CORS 制約あり" --> target
+```
+
 ## 実機(Tauri)
 
 - WebKitGTK の CORS 制約を避けるため、`tauri-plugin-http` の fetch を使う。
@@ -35,7 +46,9 @@
 - メソッド・ボディ(GET/HEAD 以外は生バイト列をそのまま)・ヘッダーを引き継ぐ。
   ただし `host` / `origin` / `referer` / `connection` / `content-length` は転送前に除去。
 - OPTIONS プリフライトには 204 + CORS 許可ヘッダーで応答する。
-  許可ヘッダー: `Authorization, Content-Type, Accept`
+  許可ヘッダーは `Access-Control-Request-Headers` の要求値をそのまま反映する
+  (外部サイト設定の任意 HTTP ヘッダー(X-Api-Key 等)を通すため。要求が無い
+  場合の既定は `Authorization, Content-Type, Accept`)。
 - 転送先の最終 URL(リダイレクト追跡後)を `X-Final-Url` ヘッダーで返す
   (`Access-Control-Expose-Headers` で公開)。外部サイト表示が
   相対 URL の解決基準として使う。

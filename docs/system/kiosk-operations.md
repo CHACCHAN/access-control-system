@@ -7,7 +7,7 @@ X セッション唯一のクライアントとして起動する構成を前提
 
 | コマンド | 実装 | 用途 |
 |---|---|---|
-| `restart_computer` | `systemctl reboot` | 端末の再起動(設定保存後の自動再起動にも使用) |
+| `restart_computer` | `systemctl reboot` | 端末の再起動(再起動が必要な設定変更の保存時にも使用。→ [settings/settings.md](../settings/settings.md)、現在は該当項目なし) |
 | `shutdown_computer` | `systemctl poweroff` | 端末の電源断 |
 | `exit_app` | `app.exit(0)` | アプリ終了 → X セッションごと終了し startx 前のシェルへ戻る |
 

@@ -49,6 +49,12 @@ export interface FaceRecognitionOptions {
   includeLandmarks: boolean;
   /** この顔幅比率未満では、フロントが結果を使わないため照合を省略する。 */
   minMatchFaceWidthRatio: number;
+  /**
+   * 照合を省略していても、映像に焼き込む顔枠を「認識済み(緑)」で描くか。
+   * 確認カード表示中(本人特定済みで離脱検出だけを行う間)に、枠の色が
+   * 未認識(シアン)へ戻らないようにするために使う。
+   */
+  overlayRecognized?: boolean;
 }
 
 /** 推論基盤(ONNX Runtime + 5モデル)を初期化する。冪等。 */

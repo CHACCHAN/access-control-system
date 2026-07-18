@@ -1,4 +1,4 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { withTimeout } from "@/shared/lib/withTimeout";
 import type { BootCheckResult } from "./checks";
@@ -28,14 +28,13 @@ function hasVisibleSignal(ctx: CanvasRenderingContext2D, width: number, height: 
  *
  * 開発時(ブラウザ/webview上のデバッグ)は Web標準API、実機(Tauri)では
  * WebKitGTK経由の getUserMedia() が機能しないため、Rust側がv4l2から取得した
- * フレームを Tauri イベント経由で受け取る方式を使う。
+ * フレーム(Tauri Channel 経由のバイナリJPEG)を受け取る方式を使う。
  */
 export async function testCameraCapture(): Promise<BootCheckResult> {
   return isTauri() ? testCameraCaptureNative() : testCameraCaptureBrowser();
 }
 
 async function testCameraCaptureNative(): Promise<BootCheckResult> {
-  let unlistenFrame: UnlistenFn | undefined;
   let unlistenError: UnlistenFn | undefined;
   let timeoutId: number | undefined;
 
@@ -49,10 +48,13 @@ async function testCameraCaptureNative(): Promise<BootCheckResult> {
     let frameSettled = false;
     let frameDecoding = false;
     let lastFailureReason = "映像フレームを受信できませんでした";
-    unlistenFrame = await listen<{ imageData: string }>("camera-frame", (event) => {
+    // 本画面(useNativeCameraFeed)と同じ受信経路で診断する。診断後に本画面が
+    // 自分のチャンネルを登録し直すため、ここでの登録は使い捨てでよい。
+    const frameChannel = new Channel<ArrayBuffer>();
+    frameChannel.onmessage = (frame) => {
       if (frameSettled || frameDecoding) return;
       frameDecoding = true;
-      void decodeAndCheckFrame(event.payload.imageData)
+      void decodeAndCheckFrame(frame)
         .then((value) => {
           if (frameSettled) return;
           frameSettled = true;
@@ -65,7 +67,8 @@ async function testCameraCaptureNative(): Promise<BootCheckResult> {
         .finally(() => {
           frameDecoding = false;
         });
-    });
+    };
+    await invoke<void>("set_camera_frame_channel", { channel: frameChannel });
     unlistenError = await listen<string>("camera-error", (event) => {
       if (frameSettled) return;
       frameSettled = true;
@@ -91,29 +94,29 @@ async function testCameraCaptureNative(): Promise<BootCheckResult> {
     return { ok: false, detail: err instanceof Error ? err.message : String(err) };
   } finally {
     if (timeoutId !== undefined) window.clearTimeout(timeoutId);
-    unlistenFrame?.();
     unlistenError?.();
     // カメラ解放完了後にだけ診断を終了し、本画面の再startとの競合を防ぐ。
     await invoke("stop_camera_capture").catch(() => {});
   }
 }
 
-async function decodeAndCheckFrame(base64: string): Promise<{ width: number; height: number }> {
-  const img = new Image();
-  img.src = `data:image/jpeg;base64,${base64}`;
-  await img.decode();
+async function decodeAndCheckFrame(jpeg: ArrayBuffer): Promise<{ width: number; height: number }> {
+  const bitmap = await createImageBitmap(new Blob([jpeg], { type: "image/jpeg" }));
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("canvas コンテキストを取得できませんでした");
+    ctx.drawImage(bitmap, 0, 0);
 
-  const canvas = document.createElement("canvas");
-  canvas.width = img.naturalWidth;
-  canvas.height = img.naturalHeight;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("canvas コンテキストを取得できませんでした");
-  ctx.drawImage(img, 0, 0);
-
-  if (!hasVisibleSignal(ctx, canvas.width, canvas.height)) {
-    throw new Error("映像が真っ黒です(レンズキャップ等の可能性)");
+    if (!hasVisibleSignal(ctx, canvas.width, canvas.height)) {
+      throw new Error("映像が真っ黒です(レンズキャップ等の可能性)");
+    }
+    return { width: canvas.width, height: canvas.height };
+  } finally {
+    bitmap.close();
   }
-  return { width: canvas.width, height: canvas.height };
 }
 
 async function testCameraCaptureBrowser(): Promise<BootCheckResult> {

@@ -55,8 +55,10 @@ export function useFaceRecognitionLoop({
   // 推論はRust側(i7-3770想定)で数百ms かかるため、過度なポーリングに
   // ならない間隔にする。前回の推論が終わるまで次は投げない。
   const detectionIntervalMs = Math.max(200, settings.performance.recognitionIntervalMs || 1000);
-  // 同一人物がこの回数連続で認識されたときだけ確認カードを出す(誤爆防止)
-  const stableCount = Math.max(1, Math.round(settings.performance.recognitionStableCount) || 1);
+  // 同一人物がこの回数連続で認識されたときだけ確認カードを出す(誤爆防止)。
+  // 0 は無制限(いくら連続一致しても確認カードを出さない = 自動確定を無効化)。
+  const stableCount = Math.max(0, Math.round(settings.performance.recognitionStableCount) || 0);
+  const requiredStreak = stableCount === 0 ? Number.POSITIVE_INFINITY : stableCount;
   // 顔がフレーム幅に対してこの比率未満なら「もう少し近づいてください」を出す。
   // 設定(照合する最小顔サイズ比率)で調整できる。小さくするほど遠くても認証を試みる。
   const closeThreshold =
@@ -111,6 +113,9 @@ export function useFaceRecognitionLoop({
           // この比率未満の認識結果は下で「近づいて」と破棄するため、Rust側でも
           // ランドマーク・embedding処理へ進ませない。
           minMatchFaceWidthRatio: closeThreshold,
+          // 確認カード表示中は本人特定済みなので、照合を省略していても
+          // 顔枠を「認識成功(緑)」のまま維持する(シアンへ戻さない)。
+          overlayRecognized: matchedMember !== null,
         });
         // active/mode/メンバー一覧が変わった後に届いた旧推論結果をUIへ反映しない。
         if (cancelled) return;
@@ -181,7 +186,7 @@ export function useFaceRecognitionLoop({
             const streak = matchStreakRef.current;
             const count = streak?.userId === member.username ? streak.count + 1 : 1;
             matchStreakRef.current = { userId: member.username, count };
-            if (count < stableCount) {
+            if (count < requiredStreak) {
               setHint("scanning");
               return;
             }

@@ -16,8 +16,21 @@ describe("normalizeSettings", () => {
       },
     });
     expect(settings.performance.recognitionIntervalMs).toBe(200);
-    expect(settings.performance.recognitionStableCount).toBe(5);
+    // 連続一致回数の上限は実質無制限(入力ミス対策の9999のみ)
+    expect(settings.performance.recognitionStableCount).toBe(999);
     expect(settings.performance.cameraJpegQuality).toBe(DEFAULT_PERFORMANCE.cameraJpegQuality);
+  });
+
+  test("連続一致回数は0(無制限)を許可し、負数は0へクランプする", () => {
+    const settings = normalizeSettings({
+      performance: {
+        ...DEFAULT_PERFORMANCE,
+        recognitionStableCount: 0,
+        gestureStableCount: -3,
+      },
+    });
+    expect(settings.performance.recognitionStableCount).toBe(0);
+    expect(settings.performance.gestureStableCount).toBe(0);
   });
 
   test("トグルを正規化する(旧保存データはキー欠損)", () => {
@@ -42,7 +55,7 @@ describe("normalizeSettings", () => {
     // 旧設定(単一 portalUrl)→ 外部サイト1件へ移行
     const migrated = normalizeSettings({ portalUrl: "https://portal.example.com" });
     expect(migrated.externalSites).toEqual([
-      { name: "ポータルサイト", url: "https://portal.example.com" },
+      { name: "ポータルサイト", url: "https://portal.example.com", headers: [] },
     ]);
 
     // 一覧が既にあれば portalUrl は無視。不正な要素・空行は除去、型も正規化
@@ -56,9 +69,44 @@ describe("normalizeSettings", () => {
       ],
     });
     expect(settings.externalSites).toEqual([
-      { name: "Wiki", url: "https://wiki.example.com" },
-      { name: "", url: "https://a.example.com" },
+      { name: "Wiki", url: "https://wiki.example.com", headers: [] },
+      { name: "", url: "https://a.example.com", headers: [] },
     ]);
+  });
+
+  test("外部サイトのHTTPヘッダーを正規化する(名前が空の行・不正型は除去)", () => {
+    const settings = normalizeSettings({
+      externalSites: [
+        {
+          name: "Portal",
+          url: "https://portal.example.com",
+          headers: [
+            { name: " Authorization ", value: "Bearer xyz" },
+            { name: "", value: "orphan-value" },
+            { name: "X-Api-Key", value: 123 },
+            "invalid",
+          ],
+        },
+        // headers 未定義の旧データは空配列で補完
+        { name: "Wiki", url: "https://wiki.example.com" },
+      ],
+    });
+    expect(settings.externalSites[0].headers).toEqual([
+      { name: "Authorization", value: "Bearer xyz" },
+      { name: "X-Api-Key", value: "" },
+    ]);
+    expect(settings.externalSites[1].headers).toEqual([]);
+  });
+
+  test("ジェスチャーのカウントダウン秒数を0〜10へクランプする", () => {
+    expect(normalizeSettings({}).gestureCountdownSeconds).toBe(3);
+    expect(normalizeSettings({ gestureCountdownSeconds: 0 }).gestureCountdownSeconds).toBe(0);
+    expect(normalizeSettings({ gestureCountdownSeconds: 99 }).gestureCountdownSeconds).toBe(10);
+    expect(normalizeSettings({ gestureCountdownSeconds: -5 }).gestureCountdownSeconds).toBe(0);
+    expect(
+      normalizeSettings({ gestureCountdownSeconds: Number.NaN }).gestureCountdownSeconds,
+    ).toBe(3);
+    expect(normalizeSettings({ gestureCountdownSeconds: 2.6 }).gestureCountdownSeconds).toBe(3);
   });
 
   test("不正なenumとパネル背景を既定値へ戻す", () => {

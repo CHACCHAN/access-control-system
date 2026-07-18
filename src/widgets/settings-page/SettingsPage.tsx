@@ -19,6 +19,7 @@ import {
   SlidersIcon,
   TerminalIcon,
 } from "@/shared/ui/icons";
+import { restartRequiredChanges } from "./restartPolicy";
 import { GeneralSection } from "./sections/GeneralSection";
 import { AppearanceSection } from "./sections/AppearanceSection";
 import { PerformanceSection } from "./sections/PerformanceSection";
@@ -57,7 +58,13 @@ const SECTIONS: { id: SectionId; label: string; en: string; icon: IconType }[] =
   { id: "system", label: "システム", en: "SYSTEM", icon: ServerIcon },
 ];
 
-function validateSettings(settings: AppSettings): string | null {
+interface ValidationError {
+  /** エラーの発生元セクション(エラー表示時にここへ自動で切り替える) */
+  section: SectionId;
+  message: string;
+}
+
+function validateSettings(settings: AppSettings): ValidationError | null {
   const invalid: string[] = [];
   if (!isValidJsonTemplate(settings.descriptorBodyTemplate)) {
     invalid.push("顔特徴ベクトル登録");
@@ -66,8 +73,16 @@ function validateSettings(settings: AppSettings): string | null {
     invalid.push("在室状況更新");
   }
   if (invalid.length > 0) {
-    return `${invalid.join("・")}のAPIボディが正しいJSONではありません`;
+    return {
+      section: "apibody",
+      message: `${invalid.join("・")}のAPIボディが正しいJSONではありません`,
+    };
   }
+
+  const connectionError = (message: string): ValidationError => ({
+    section: "connection",
+    message,
+  });
 
   const endpoints: Array<[string, string, readonly string[]]> = [
     ["メンバー取得API", settings.getEndpoint, ["http:", "https:"]],
@@ -78,21 +93,37 @@ function validateSettings(settings: AppSettings): string | null {
   for (const [label, value, protocols] of endpoints) {
     if (!value) continue;
     try {
-      if (!protocols.includes(new URL(value).protocol)) return `${label}のURL形式が不正です`;
+      if (!protocols.includes(new URL(value).protocol)) {
+        return connectionError(`${label}のURL形式が不正です`);
+      }
     } catch {
-      return `${label}のURL形式が不正です`;
+      return connectionError(`${label}のURL形式が不正です`);
     }
   }
 
+  // HTTP ヘッダー名として使える文字(RFC 9110 の token)
+  const HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
   for (const site of settings.externalSites) {
     const label = site.name.trim() || site.url || "(名称未設定)";
-    if (!site.url.trim()) return `外部サイト「${label}」のURLが未入力です`;
+    if (!site.url.trim()) return connectionError(`外部サイト「${label}」のURLが未入力です`);
     try {
       if (!["http:", "https:"].includes(new URL(site.url).protocol)) {
-        return `外部サイト「${label}」のURL形式が不正です(http/httpsのみ)`;
+        return connectionError(`外部サイト「${label}」のURL形式が不正です(http/httpsのみ)`);
       }
     } catch {
-      return `外部サイト「${label}」のURL形式が不正です(http/httpsのみ)`;
+      return connectionError(`外部サイト「${label}」のURL形式が不正です(http/httpsのみ)`);
+    }
+    for (const header of site.headers) {
+      const name = header.name.trim();
+      if (name === "") continue; // 空行は保存時に除去される
+      if (!HEADER_NAME_PATTERN.test(name)) {
+        return connectionError(
+          `外部サイト「${label}」のヘッダー名「${header.name}」が不正です(英数字と記号のみ、空白・コロン不可)`,
+        );
+      }
+      if (/[\r\n]/.test(header.value)) {
+        return connectionError(`外部サイト「${label}」のヘッダー値に改行は使えません`);
+      }
     }
   }
   return null;
@@ -109,8 +140,9 @@ function errorMessage(error: unknown): string {
  * HUD 風の装飾を合わせている。
  *
  * 保存は draft をまとめて permanent 化する方式(どのセクションを編集しても
- * ヘッダーの「保存」1つで全設定が反映される)。実機では反映のため保存後に
- * 自動再起動する(旧 SettingsPanel の挙動を踏襲)。
+ * ヘッダーの「保存」1つで全設定が反映される)。保存した設定は再起動なしで
+ * 即時反映される。再起動が必要な項目(restartPolicy.ts で宣言)が変更された
+ * 場合のみ、保存前に再起動確認モーダルを挟む。
  */
 export function SettingsPage({ onClose }: SettingsPageProps) {
   const { settings, updateSettings, isLoading: isSettingsLoading } = useSettings();
@@ -119,7 +151,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
-  const [isConfirmingSave, setIsConfirmingSave] = useState(false);
+  // 再起動が必要な変更項目のラベル一覧。null 以外なら再起動確認モーダルを表示中
+  const [pendingRestartItems, setPendingRestartItems] = useState<string[] | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   // state の再レンダーより先に二重クリックされても、保存処理を1本に制限する。
   const saveInFlightRef = useRef(false);
@@ -147,15 +180,17 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 
   // 編集内容が保存済みの設定と異なるか(未保存の変更があるか)
   const isDirty = JSON.stringify(draft) !== JSON.stringify(settings);
+  const isConfirmingSave = pendingRestartItems !== null;
 
-  function reportValidationError(message: string) {
-    setIsConfirmingSave(false);
-    setActiveSection(message.includes("URL") ? "connection" : "apibody");
-    setSaveError(message);
+  function reportValidationError(error: ValidationError) {
+    setPendingRestartItems(null);
+    // エラーの発生元セクションへ自動で切り替え、該当の入力欄をすぐ直せるようにする
+    setActiveSection(error.section);
+    setSaveError(error.message);
     playUiSound("error");
   }
 
-  async function commitSave() {
+  async function commitSave(restart: boolean) {
     if (saveInFlightRef.current) return;
 
     const validationError = validateSettings(draft);
@@ -165,7 +200,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
 
     saveInFlightRef.current = true;
-    setIsConfirmingSave(false);
+    setPendingRestartItems(null);
     setIsSaving(true);
     setIsRestarting(false);
     setSaveError(null);
@@ -175,10 +210,12 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     let phase: "save" | "restart" = "save";
     try {
       // updateSettings の完了は、デバウンスされたstore.saveまで完了したことを意味する。
+      // 保存された設定は各消費側(API再取得・WebSocket再接続・Rustのstore再読込)が
+      // 検知して即時反映するため、通常は再起動しない。
       await updateSettings(draft);
 
-      // 設定変更(特にエンドポイント類)を確実に反映させるため、実機では保存後に自動再起動する。
-      if (isTauri()) {
+      // 再起動が必要な項目(restartPolicy.ts)が変更されたときだけ再起動する。
+      if (restart && isTauri()) {
         phase = "restart";
         setIsRestarting(true);
         await restartComputer();
@@ -208,12 +245,14 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
 
     setSaveError(null);
-    // 実機では保存後に自動再起動するため、初回送信では確認を挟む
-    if (isTauri()) {
-      setIsConfirmingSave(true);
+    // 再起動が必要な項目が変更された保存だけ、事前に確認モーダルを挟む。
+    // それ以外は保存のみで即時反映される(端末は再起動しない)。
+    const restartItems = isTauri() ? restartRequiredChanges(settings, draft) : [];
+    if (restartItems.length > 0) {
+      setPendingRestartItems(restartItems);
       return;
     }
-    void commitSave();
+    void commitSave(false);
   }
 
   return (
@@ -369,14 +408,15 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         </form>
       </div>
 
-      {/* 保存 → 再起動の確認モーダル(実機のみ)。電源操作と共通の確認ダイアログ部品 */}
-      {isConfirmingSave && (
+      {/* 再起動が必要な項目が変更されたときだけ表示する確認モーダル(実機のみ)。
+          電源操作と共通の確認ダイアログ部品 */}
+      {pendingRestartItems && (
         <ConfirmDialog
           eyebrow="confirm"
           eyebrowClass="text-amber-500"
           borderClass="border-slate-200 dark:border-amber-500/25"
           title="設定を保存して再起動しますか？"
-          message="保存した設定を反映するため、端末を自動再起動します"
+          message={`次の設定の反映には端末の再起動が必要です: ${pendingRestartItems.join("・")}`}
           confirmLabel={
             <>
               <CheckIcon className="h-4 w-4" />
@@ -386,9 +426,9 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           confirmButtonClass="bg-amber-500 hover:bg-amber-400 text-white"
           busy={isSaving || isRestarting}
           onCancel={() => {
-            if (!saveInFlightRef.current) setIsConfirmingSave(false);
+            if (!saveInFlightRef.current) setPendingRestartItems(null);
           }}
-          onConfirm={() => void commitSave()}
+          onConfirm={() => void commitSave(true)}
         />
       )}
     </div>

@@ -25,25 +25,39 @@
 
 ## プロセス・データフロー
 
-```
-┌────────────────────────── Tauri プロセス ──────────────────────────┐
-│                                                                    │
-│  ┌── Rust 側 ─────────────────────────┐   ┌── WebView(React) ──┐ │
-│  │ camera_capture: v4l2 キャプチャ     │   │ メンバー一覧表示     │ │
-│  │  ├→ SharedFrame(最新フレーム共有)  │   │ 顔認証パネル         │ │
-│  │  └→ camera-frame イベント(base64) ─┼──→│ 設定画面             │ │
-│  │ vision: 顔認証・ジェスチャー推論     │←──┼─ invoke(recognize等) │ │
-│  │ settings.rs: settings.json 読み出し │   │ tauri-plugin-store   │ │
-│  └────────────────────────────────────┘   └──────────┬───────────┘ │
-└───────────────────────────────────────────────────────┼─────────────┘
-                                                        │ HTTP / WebSocket
-                                            外部 API(在室管理サーバー)
+```mermaid
+flowchart LR
+  subgraph tauri["Tauri プロセス"]
+    subgraph rust["Rust 側"]
+      cam["camera_capture<br>v4l2 キャプチャスレッド"]
+      shared["SharedFrame<br>(最新フレーム共有)"]
+      vision["vision<br>顔認証・ジェスチャー推論"]
+      audio["audio<br>効果音再生(cpal → ALSA)"]
+      settings_rs["settings.rs<br>settings.json 読み出し"]
+    end
+    subgraph webview["WebView(React)"]
+      ui["メンバー一覧 / 顔認証パネル /<br>設定画面(tauri-plugin-store)"]
+      canvas["カメラ映像(canvas)"]
+    end
+  end
+  server["外部 API(在室管理サーバー)"]
+
+  cam --> shared
+  shared --> vision
+  cam -- "Tauri Channel(JPEGバイナリ)" --> canvas
+  ui -- "invoke(recognize_face / detect_gesture 等)" --> vision
+  vision -- "結果(JSON)" --> ui
+  ui -- "invoke(play_ui_sound)" --> audio
+  ui -- "HTTP / WebSocket" --> server
+  settings_rs -.-> cam
+  settings_rs -.-> vision
 ```
 
 - **推論はすべて Rust 側で完結**する。フロントは `invoke` で結果(JSON)を受け取るだけ。
 - カメラフレームはキャプチャスレッドが `SharedFrame`(Mutex)へ常に最新を上書きし、
   推論はフロントの表示ペースと独立に「その時点の最新フレーム」を読む。
-- フロントへの映像は JPEG → base64 で `camera-frame` イベントとして送る(表示専用)。
+- フロントへの映像は JPEG バイナリのまま Tauri Channel で送る(表示専用)。
+  base64 文字列イベントだった旧方式に比べ、エンコード/デコードの二重コストが無い。
 
 ## ディレクトリ構成(主要部)
 

@@ -6,7 +6,22 @@
   `settings` キーで一括保存される(ブラウザ単体実行時は保存されず既定値のみ)。
 - 設定画面は draft(編集バッファ)方式。どのセクションを編集しても、ヘッダーの
   「保存」1つで全設定が保存される。
-- **実機では保存後に端末を自動再起動**して設定を確実に反映する(保存前に確認モーダルあり)。
+- **保存した設定は端末を再起動せずに即時反映される**。エンドポイント・APIトークンは
+  メンバー一覧の自動再取得、WebSocket は再接続、Rust 側が読む項目(camera* /
+  match* / gestureStatusMap)は store の再読込で追従する。
+- 再起動が必要な項目は `src/widgets/settings-page/restartPolicy.ts` に宣言的に
+  登録する(**現在は該当なし**)。登録した項目が変更された保存のみ、従来どおり
+  確認モーダル → 端末再起動となる(モーダルには該当項目名を表示)。
+
+```mermaid
+flowchart TD
+  edit["設定を編集(draft)"] --> save["保存ボタン"]
+  save --> validate{"検証 OK ?"}
+  validate -- "No" --> err["エラーバナー表示<br>該当セクションへ自動移動"]
+  validate -- "Yes" --> restart{"要再起動項目の変更あり ?<br>(restartPolicy.ts / 現在は無し)"}
+  restart -- "No" --> apply["保存 → 再起動なしで即時反映<br>(「保存済み」表示)"]
+  restart -- "Yes" --> modal["確認モーダル(該当項目名を表示)<br>→ 保存 → 端末再起動"]
+```
 - 読み込み時は既定値とのマージを行い、後からキーが増えても古い保存データで
   欠損しない(ネストした `gestureStatusMap` / `performance` / `appearance` は個別にマージ)。
 
@@ -37,7 +52,7 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 
 `theme` / `uiScale` / `hardwareVolume` は**保存不要の即時反映**(操作した瞬間に
 設定へ書き込まれ、端末にも適用される)。その他の項目は「保存」で一括反映
-(実機では保存後に自動再起動)。uiScale の不正・範囲外の値は読み込み時に
+(再起動なしで即時反映)。uiScale の不正・範囲外の値は読み込み時に
 0.8〜1.5 へクランプされる。
 
 ### デザイン(APPEARANCE)→ 詳細は [ui/design-customization.md](../ui/design-customization.md)
@@ -56,9 +71,9 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 | キー | 既定値 | 反映 | 内容 |
 |---|---|---|---|
 | performance.recognitionIntervalMs | 1000 | 即時 | 顔認証の推論間隔(ms) |
-| performance.recognitionStableCount | 1 | 即時 | 顔認証の連続一致回数(確認カード表示まで) |
+| performance.recognitionStableCount | 1 | 即時 | 顔認証の連続一致回数(確認カード表示まで)。0で無制限(自動確定しない) |
 | performance.gesturePollIntervalMs | 700 | 即時 | ジェスチャー認識の間隔(ms) |
-| performance.gestureStableCount | 2 | 即時 | ジェスチャーの連続一致回数 |
+| performance.gestureStableCount | 2 | 即時 | ジェスチャーの連続一致回数。0で無制限(ジェスチャーでは更新しない) |
 | performance.cameraFrameIntervalMs | 100 | 数秒で反映 | カメラ映像の送信間隔(ms)。100ms=10fps |
 | performance.cameraJpegQuality | 75 | 数秒で反映 | カメラ映像の JPEG 品質(10-100) |
 | performance.matchThreshold | 0.5 | 即時 | 照合閾値(コサイン類似度) |
@@ -68,7 +83,7 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 カメラの送信間隔・JPEG品質は、キャプチャスレッドが 2 秒間隔で設定を読み直すため、
 端末を再起動しなくても数秒で反映される(カメラは掴み直さないので映像は途切れない)。
 照合パラメータ(match* / minFaceWidthRatio)は Rust 側が推論のたびに読むため即時反映される。
-いずれも設定「保存」時に実機では再起動が走るが、反映自体は再起動を待たない。
+いずれも「保存」だけで反映され、端末の再起動は不要。
 
 ### API 接続(CONNECTION)
 
@@ -79,7 +94,7 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 | attendanceEndpoint | 在室状況更新 API(POST) |
 | wsEndpoint | 更新シグナル WebSocket |
 | apiToken | Authorization ヘッダーへそのまま送る値(例: `Bearer xxx`) |
-| externalSites | 外部サイトの一覧(`{ name, url }` の配列、最大12件)。トップ画面の地球儀ボタンからアプリ内のフルスクリーンページとして開く。複数登録すると一覧から選択、1件なら直接開く。iframe 直接読み込みではなく、**他の API と同じ通信経路(開発時=中継サーバ / 実機=Rust reqwest)で HTML を取得して描画**するため、X-Frame-Options 等の埋め込み拒否の影響を受けない。サイト側の JavaScript は実行しない(サーバーレンダリングのサイト向け)。旧設定 `portalUrl`(単一URL)は読み込み時に1件目として自動移行される → [ui/screens.md](../ui/screens.md) |
+| externalSites | 外部サイトの一覧(`{ name, url, headers }` の配列、最大12件)。`headers` はページ取得時に付与する任意の HTTP ヘッダー(`{ name, value }` の配列、サイトごとに最大8件。認証トークン等)で、ページ本体の取得とリンク・フォーム遷移に適用される(CSS・画像などのサブリソースはブラウザが直接読むため対象外)。トップ画面の地球儀ボタンからアプリ内のフルスクリーンページとして開く。複数登録すると一覧から選択、1件なら直接開く。iframe 直接読み込みではなく、**他の API と同じ通信経路(開発時=中継サーバ / 実機=Rust reqwest)で HTML を取得して描画**するため、X-Frame-Options 等の埋め込み拒否の影響を受けない。サイト側の JavaScript は実行しない(サーバーレンダリングのサイト向け)。旧設定 `portalUrl`(単一URL)は読み込み時に1件目として自動移行される → [ui/screens.md](../ui/screens.md) |
 
 ### API ボディ(REQUEST BODY)
 
@@ -102,6 +117,7 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 | キー | 既定値 | 内容 |
 |---|---|---|
 | rejectGesture | ThumbsDown | 確認カードで「ちがう」を意味するジェスチャー(サムズダウン👎)。空文字で無効 |
+| gestureCountdownSeconds | 3 | ジェスチャー確定から在室状況の送信までのカウントダウン秒数(0〜10)。画面に 3→2→1 のアニメーションを表示し、カウント中に手を下ろすとキャンセルできる。**0 は即時送信** |
 
 ### ジェスチャー割り当ての選択UI
 

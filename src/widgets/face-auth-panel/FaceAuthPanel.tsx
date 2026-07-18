@@ -50,7 +50,6 @@ export function FaceAuthPanel({
   const { members, activeMember, selectMember, updateStatus } = useMembers();
   const {
     mediaRef,
-    mediaBufferRef,
     mediaKind,
     cameraStatus,
     cameraError,
@@ -96,14 +95,19 @@ export function FaceAuthPanel({
     }
   }, [matchedMember?.username]);
 
-  const { detectedGesture } = useGestureStatusLoop({
-    active: isInteractive && showConfirm && !gestureCompleted && !gesturePosting,
+  const { detectedGesture, countdown } = useGestureStatusLoop({
+    // 送信中(gesturePosting)も active を維持する。ここで active を落とすと
+    // ループが再起動して発火済みガードがリセットされ、同じ手を出し続けている
+    // だけで再送(特に失敗時のリトライ連発)になるため、多重実行は
+    // handleGestureStatus 側のガードで弾く。
+    active: isInteractive && showConfirm && !gestureCompleted,
     onStatus: (status) => void handleGestureStatus(status),
     // サムズダウン(設定 rejectGesture)で「ちがう」= 確認カードを閉じて認証へ戻る
     onReject: () => {
       playUiSound("click");
       dismissMatch();
     },
+    unavailableStatus: matchedMember?.status ?? null,
   });
 
   async function handleGestureStatus(status: AttendanceStatus) {
@@ -192,7 +196,6 @@ export function FaceAuthPanel({
       <div className="cyber-corners relative flex-1 overflow-hidden rounded-xl border border-slate-200 bg-slate-900 shadow-inner shadow-black/40 dark:border-cyan-400/15">
         <CameraFeed
           mediaRef={mediaRef}
-          mediaBufferRef={mediaBufferRef}
           mediaKind={mediaKind}
           status={cameraStatus}
           error={cameraError}
@@ -234,6 +237,7 @@ export function FaceAuthPanel({
             onConfirm={handleConfirmMatch}
             onReject={dismissMatch}
             detectedGesture={detectedGesture}
+            countdown={countdown}
             completedAction={gestureCompleted}
             busy={gesturePosting}
           />

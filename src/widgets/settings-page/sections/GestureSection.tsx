@@ -25,6 +25,10 @@ const GESTURE_FIELDS: { key: keyof GestureStatusMap; icon: IconType; label: stri
   { key: "paper", icon: GesturePaperIcon, label: "パー" },
 ];
 
+// 送信までのカウントダウン秒数の選択肢(0 = 即時送信)。
+// 正規化(normalizeSettings)は 0〜10 の整数を受け付ける
+const COUNTDOWN_CHOICES = [0, 1, 2, 3, 5, 10] as const;
+
 export function GestureSection({ draft, setDraft }: SectionProps) {
   return (
     <SettingsCard>
@@ -75,6 +79,45 @@ export function GestureSection({ draft, setDraft }: SectionProps) {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* ジェスチャー確定から送信までのカウントダウン秒数。誤認識時に手を
+          下ろしてキャンセルできる猶予を作る(0秒は従来どおりの即時送信)。 */}
+      <p className="mb-3 mt-6 font-mono text-[10px] font-medium uppercase tracking-[0.25em] text-cyan-600/80 dark:text-cyan-400/70">
+        timing
+      </p>
+      <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 dark:border-white/10 dark:bg-slate-950/40">
+        <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
+          送信までのカウントダウン
+        </p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
+          ジェスチャーを認識してから在室状況を送信するまで、画面にカウントダウン(3→2→1)を表示します。カウント中に手を下ろすとキャンセルできます。0秒は即時送信
+        </p>
+        <div
+          className="mt-3 flex flex-wrap gap-1.5"
+          role="radiogroup"
+          aria-label="送信までのカウントダウン秒数"
+        >
+          {COUNTDOWN_CHOICES.map((seconds) => {
+            const active = draft.gestureCountdownSeconds === seconds;
+            return (
+              <button
+                key={seconds}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setDraft((d) => ({ ...d, gestureCountdownSeconds: seconds }))}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                  active
+                    ? "border-cyan-500/60 bg-cyan-500/10 text-cyan-700 ring-1 ring-cyan-500/40 dark:border-cyan-400/50 dark:text-cyan-300 dark:ring-cyan-400/40"
+                    : "border-slate-300 text-slate-500 hover:border-slate-400 hover:text-slate-700 dark:border-white/10 dark:text-slate-400 dark:hover:border-white/25 dark:hover:text-slate-200"
+                }`}
+              >
+                {seconds === 0 ? "即時" : `${seconds}秒`}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* 確認カード(「◯◯さんですか?」)で「ちがう」を意味するジェスチャー。
