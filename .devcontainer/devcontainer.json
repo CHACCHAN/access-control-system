@@ -1,18 +1,26 @@
 {
-  "name": "face-gesture-wasm-dev",
+  "name": "access-control-system-dev",
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
   "build": {
     "dockerfile": "Dockerfile",
     "context": ".."
   },
-  "forwardPorts": [1420, 5173, 8080, 8787],
   "workspaceFolder": "/${localWorkspaceFolderBasename}",
   "workspaceMount": "source=${localWorkspaceFolder},target=/${localWorkspaceFolderBasename},type=bind,consistency=cached",
   "mounts": [
-    "source=${localEnv:HOME}/.gitlab-credentials-devcontainer,target=/root/.git-credentials,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.claude,target=/root/.claude,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.codex,target=/root/.codex,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.gitconfig-devcontainer,target=/root/.gitconfig,type=bind,consistency=cached"
+    "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.gitconfig,target=/home/vscode/.gitconfig,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.codex,target=/home/vscode/.codex,type=bind,consistency=cached",
+    "source=node-modules-${localWorkspaceFolderBasename},target=${containerWorkspaceFolder}/node_modules,type=volume",
+    "source=dist-${localWorkspaceFolderBasename},target=${containerWorkspaceFolder}/dist,type=volume",
+    "source=target-${localWorkspaceFolderBasename},target=${containerWorkspaceFolder}/src-tauri/target,type=volume"
   ],
+  "remoteEnv": {
+    "WORKSPACE_DIR": "/${localWorkspaceFolderBasename}"
+  },
+  "postCreateCommand": "bash .devcontainer/postCreateCommand.sh && bash .devcontainer/setup-models.sh",
   "customizations": {
     "vscode": {
       "extensions": [
@@ -58,6 +66,5 @@
         }
       }
     }
-  },
-  "postCreateCommand": "bash .devcontainer/setup-models.sh"
+  }
 }

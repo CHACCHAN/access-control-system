@@ -1,10 +1,9 @@
-FROM rust:1-bookworm
+FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     curl \
     wget \
-    git \
     build-essential \
     pkg-config \
     libssl-dev \
@@ -21,8 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libclang-dev \
     libv4l-dev \
     && rm -rf /var/lib/apt/lists/*
-# libclang-dev / libv4l-dev: nokhwa(v4l2バインディング)のビルドに必要。
-# bindgen が libclang 経由で v4l2 ヘッダーを読む。
+
+USER vscode
+ENV BUN_INSTALL="/home/vscode/.bun" \
+    PATH="/home/vscode/.bun/bin:${PATH}"
 
 # WASM Pack
 RUN rustup target add wasm32-unknown-unknown \
@@ -30,8 +31,6 @@ RUN rustup target add wasm32-unknown-unknown \
 
 # Bun
 RUN curl -fsSL https://bun.sh/install | bash
-ENV BUN_INSTALL="/root/.bun"
-ENV PATH="${BUN_INSTALL}/bin:${PATH}"
 
 # Rust Utils
 RUN cargo install cargo-watch --locked || true
@@ -39,6 +38,6 @@ RUN cargo install cargo-watch --locked || true
 # Tauri CLI (v2)
 RUN cargo install tauri-cli --version "^2" --locked
 
-RUN echo 'export PATH="/root/.bun/bin:/usr/local/cargo/bin:$PATH"' >> /root/.bashrc
+RUN echo 'export PATH=$PATH' >> /home/vscode/.bashrc
 
 CMD ["sleep", "infinity"]

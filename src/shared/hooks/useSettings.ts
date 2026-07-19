@@ -413,11 +413,11 @@ export function normalizeSettings(value: unknown): AppSettings {
         5000,
         true,
       ),
-      // 0 は無制限(自動確定しない)。上限は実質無制限(入力ミス対策の 9999 のみ)
+      // 有効な最小値は1。旧設定の0や負値も1へ移行する。
       recognitionStableCount: finiteInRange(
         perf.recognitionStableCount,
         DEFAULT_PERFORMANCE.recognitionStableCount,
-        0,
+        1,
         9999,
         true,
       ),
@@ -428,11 +428,11 @@ export function normalizeSettings(value: unknown): AppSettings {
         5000,
         true,
       ),
-      // 0 は無制限(ジェスチャーでは更新しない)。上限は入力ミス対策の 9999 のみ
+      // 有効な最小値は1。旧設定の0や負値も1へ移行する。
       gestureStableCount: finiteInRange(
         perf.gestureStableCount,
         DEFAULT_PERFORMANCE.gestureStableCount,
-        0,
+        1,
         9999,
         true,
       ),

@@ -62,10 +62,12 @@ export function useGestureStatusLoop({
   const { settings } = useSettings();
   const gesturePollIntervalMs = Math.max(200, settings.performance.gesturePollIntervalMs || 700);
   // 誤爆防止: 同じジェスチャーがこの回数連続したときだけステータスを確定する。
-  // 0 は無制限(いくら連続しても確定しない = ジェスチャー操作を無効化)。
-  const gestureStableCount = Math.max(0, Math.round(settings.performance.gestureStableCount) || 0);
-  const requiredStreak =
-    gestureStableCount === 0 ? Number.POSITIVE_INFINITY : gestureStableCount;
+  // 0・負値・NaN は回数条件なし(1回の一致で確定)として扱う。
+  const gestureStableCount = Math.max(
+    1,
+    Math.round(settings.performance.gestureStableCount) || 1,
+  );
+  const requiredStreak = gestureStableCount;
   const rejectGesture = settings.rejectGesture;
   const countdownSeconds = settings.gestureCountdownSeconds;
 
@@ -96,6 +98,10 @@ export function useGestureStatusLoop({
     let cancelled = false;
     let inFlight = false;
     let errorLogged = false;
+    let consecutiveErrors = 0;
+    // 「確定したのに送信できない」状況を設定→ログで特定できるよう、
+    // ブロック理由の記録は理由が変わったときだけ1回にする(ログを埋めない)
+    let lastBlockLogged: string | null = null;
     let lastGesture: GestureKind | null = null;
     let streak = 0;
     // 送信待ちカウントダウン。ポーリングとは独立した1秒タイマーで進め、
@@ -116,6 +122,7 @@ export function useGestureStatusLoop({
 
     const fire = (gesture: GestureKind, status: AttendanceStatus) => {
       firedGestureRef.current = gesture;
+      console.info(`[gesture] 送信: ${gesture} → ${status}(手を下ろすまで再送信しません)`);
       onStatusRef.current(status);
     };
 
@@ -123,6 +130,7 @@ export function useGestureStatusLoop({
       pending = { gesture, status };
       pendingMisses = 0;
       let secondsLeft = countdownSeconds;
+      console.info(`[gesture] 確定: ${gesture} → ${status}(${countdownSeconds}秒カウントダウン)`);
       setCountdown({ gesture, status, secondsLeft, totalSeconds: countdownSeconds });
       countdownTimer = window.setInterval(() => {
         secondsLeft -= 1;
@@ -142,6 +150,7 @@ export function useGestureStatusLoop({
         const result = await detectGesture();
         if (cancelled) return;
         errorLogged = false;
+        consecutiveErrors = 0;
         const gesture = result.handDetected ? result.gesture : null;
         setDetectedGesture(gesture);
 
@@ -154,6 +163,7 @@ export function useGestureStatusLoop({
           } else {
             pendingMisses += 1;
             if (pendingMisses >= COUNTDOWN_MISS_TOLERANCE) {
+              console.info("[gesture] カウントダウンをキャンセル(手が離れた/変わった)");
               cancelCountdown();
               lastGesture = null;
               streak = 0;
@@ -167,6 +177,7 @@ export function useGestureStatusLoop({
           firedGestureRef.current = null;
           lastGesture = null;
           streak = 0;
+          lastBlockLogged = null;
           return;
         }
 
@@ -200,14 +211,32 @@ export function useGestureStatusLoop({
           return;
         }
 
-        if (
-          streak >= requiredStreak &&
-          result.roomStatus &&
-          isAttendanceStatus(result.roomStatus) &&
+        if (streak >= requiredStreak) {
+          // 確定に至ったのに送信しないケースは、理由を設定→ログへ残す
+          // (実機で「反応するのに送信されない」を切り分けるため)
+          if (!result.roomStatus || !isAttendanceStatus(result.roomStatus)) {
+            const reason = `${result.gesture}:no-status`;
+            if (lastBlockLogged !== reason) {
+              lastBlockLogged = reason;
+              console.warn(
+                `[gesture] ${result.gesture} を確定しましたが、割り当てステータスが不正のため送信しません: ${String(result.roomStatus)}`,
+              );
+            }
+            return;
+          }
           // 現在と同じステータスへの更新は行わない(ガイドの淡色表示と対応)。
           // ここで弾くことで、送信されないカウントダウンを表示しない。
-          result.roomStatus !== unavailableStatus
-        ) {
+          if (result.roomStatus === unavailableStatus) {
+            const reason = `${result.gesture}:same-status`;
+            if (lastBlockLogged !== reason) {
+              lastBlockLogged = reason;
+              console.info(
+                `[gesture] ${result.gesture} → ${result.roomStatus} は現在のステータスと同じため送信しません`,
+              );
+            }
+            return;
+          }
+          lastBlockLogged = null;
           streak = 0;
           if (countdownSeconds <= 0) {
             fire(result.gesture, result.roomStatus);
@@ -221,8 +250,13 @@ export function useGestureStatusLoop({
           errorLogged = true;
           console.error("[gesture] 認識エラー:", err);
         }
+        if (cancelled) return;
+        // 認識が動いていないのに直前のハイライトが残ると「検出しているのに
+        // 送信されない」ように見えるため、エラーが続いたら表示も消す
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= COUNTDOWN_MISS_TOLERANCE) setDetectedGesture(null);
         // 検出できない間はジェスチャー継続も確認できないため、取りこぼしと同じ扱い
-        if (pending && !cancelled) {
+        if (pending) {
           pendingMisses += 1;
           if (pendingMisses >= COUNTDOWN_MISS_TOLERANCE) cancelCountdown();
         }

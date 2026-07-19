@@ -21,7 +21,7 @@ describe("normalizeSettings", () => {
     expect(settings.performance.cameraJpegQuality).toBe(DEFAULT_PERFORMANCE.cameraJpegQuality);
   });
 
-  test("連続一致回数は0(無制限)を許可し、負数は0へクランプする", () => {
+  test("連続一致回数の0と負数は1へクランプする", () => {
     const settings = normalizeSettings({
       performance: {
         ...DEFAULT_PERFORMANCE,
@@ -29,8 +29,22 @@ describe("normalizeSettings", () => {
         gestureStableCount: -3,
       },
     });
-    expect(settings.performance.recognitionStableCount).toBe(0);
-    expect(settings.performance.gestureStableCount).toBe(0);
+    expect(settings.performance.recognitionStableCount).toBe(1);
+    expect(settings.performance.gestureStableCount).toBe(1);
+  });
+
+  test("連続一致回数のNaNは既定値へ戻す", () => {
+    const settings = normalizeSettings({
+      performance: {
+        ...DEFAULT_PERFORMANCE,
+        recognitionStableCount: Number.NaN,
+        gestureStableCount: Number.NaN,
+      },
+    });
+    expect(settings.performance.recognitionStableCount).toBe(
+      DEFAULT_PERFORMANCE.recognitionStableCount,
+    );
+    expect(settings.performance.gestureStableCount).toBe(DEFAULT_PERFORMANCE.gestureStableCount);
   });
 
   test("トグルを正規化する(旧保存データはキー欠損)", () => {

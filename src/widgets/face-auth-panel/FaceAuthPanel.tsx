@@ -71,7 +71,8 @@ export function FaceAuthPanel({
   function handleConfirmMatch() {
     if (!matchedMember) return;
     const member = matchedMember;
-    dismissMatch();
+    // 操作シートを閉じた後、同じ人が立ったままでも再認証できるようにする。
+    dismissMatch({ requireFaceExit: false });
     selectMember(member);
   }
 
@@ -81,14 +82,17 @@ export function FaceAuthPanel({
   // ジェスチャーをかざせばそのまま割り当てステータスで記録できる。
   const [gestureCompleted, setGestureCompleted] = useState<AttendanceStatus | null>(null);
   const [gesturePosting, setGesturePosting] = useState(false);
+  // 送信失敗はカード上に表示する(音とログだけだと「無反応」に見えるため)
+  const [gestureError, setGestureError] = useState<string | null>(null);
   const dismissTimerRef = useRef<number | null>(null);
   const matchedUsernameRef = useRef<string | null>(matchedMember?.username ?? null);
   matchedUsernameRef.current = matchedMember?.username ?? null;
 
-  // 対象メンバーが変わったら完了表示・タイマーをリセットする
+  // 対象メンバーが変わったら完了表示・エラー・タイマーをリセットする
   useEffect(() => {
     setGestureCompleted(null);
     setGesturePosting(false);
+    setGestureError(null);
     if (dismissTimerRef.current !== null) {
       window.clearTimeout(dismissTimerRef.current);
       dismissTimerRef.current = null;
@@ -115,6 +119,7 @@ export function FaceAuthPanel({
     if (status === matchedMember.status) return; // 現在と同じステータスは記録しない
     const username = matchedMember.username;
     setGesturePosting(true);
+    setGestureError(null);
     try {
       await postAttendance(
         matchedMember.username,
@@ -130,12 +135,16 @@ export function FaceAuthPanel({
       setGestureCompleted(status);
       dismissTimerRef.current = window.setTimeout(() => {
         setGestureCompleted(null);
-        dismissMatch();
+        // 記録後は顔の離脱を待たず、連続一致を最初から取り直す。
+        dismissMatch({ requireFaceExit: false });
       }, 1300);
     } catch (err) {
       if (matchedUsernameRef.current !== username) return;
       playUiSound("error");
       console.error("[face-auth] ジェスチャー記録に失敗:", err);
+      // カード上にも表示する(発火済みガードにより手を下ろすまで再試行されない
+      // ため、無音のままだと「無反応」に見える)
+      setGestureError(err instanceof Error ? err.message : String(err));
     } finally {
       if (matchedUsernameRef.current === username) setGesturePosting(false);
     }
@@ -235,11 +244,12 @@ export function FaceAuthPanel({
           <FaceMatchConfirmCard
             member={matchedMember}
             onConfirm={handleConfirmMatch}
-            onReject={dismissMatch}
+            onReject={() => dismissMatch()}
             detectedGesture={detectedGesture}
             countdown={countdown}
             completedAction={gestureCompleted}
             busy={gesturePosting}
+            errorMessage={gestureError}
           />
         )}
       </div>

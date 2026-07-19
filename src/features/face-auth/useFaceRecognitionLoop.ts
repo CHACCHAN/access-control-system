@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Member } from "@/entities/member/model";
 import { recognizeFace } from "@/shared/lib/visionApi";
 import { useSettings } from "@/shared/hooks/useSettings";
@@ -35,7 +35,7 @@ interface UseFaceRecognitionLoopResult {
   /** Rust側で推論を実行している最中かどうか(「推論中」インジケータ用) */
   isInferring: boolean;
   matchedMember: Member | null;
-  dismissMatch: () => void;
+  dismissMatch: (options?: { requireFaceExit?: boolean }) => void;
 }
 
 /**
@@ -56,9 +56,11 @@ export function useFaceRecognitionLoop({
   // ならない間隔にする。前回の推論が終わるまで次は投げない。
   const detectionIntervalMs = Math.max(200, settings.performance.recognitionIntervalMs || 1000);
   // 同一人物がこの回数連続で認識されたときだけ確認カードを出す(誤爆防止)。
-  // 0 は無制限(いくら連続一致しても確認カードを出さない = 自動確定を無効化)。
-  const stableCount = Math.max(0, Math.round(settings.performance.recognitionStableCount) || 0);
-  const requiredStreak = stableCount === 0 ? Number.POSITIVE_INFINITY : stableCount;
+  // 旧設定の0・負値・NaNは、回数条件を課さない「1回で確定」として扱う。
+  const requiredStreak = Math.max(
+    1,
+    Math.round(settings.performance.recognitionStableCount) || 1,
+  );
   // 顔がフレーム幅に対してこの比率未満なら「もう少し近づいてください」を出す。
   // 設定(照合する最小顔サイズ比率)で調整できる。小さくするほど遠くても認証を試みる。
   const closeThreshold =
@@ -75,8 +77,8 @@ export function useFaceRecognitionLoop({
   // 連続一致カウント(同じ userId が続いた回数)
   const matchStreakRef = useRef<{ userId: string; count: number } | null>(null);
   const errorLoggedRef = useRef(false);
-  // 手動否認・記録後、同じ顔が写ったまま即再表示されないよう、一度顔が
-  // フレームから外れるまで次の確定を抑止する。
+  // 手動否認後、同じ顔が写ったまま即再表示されないよう、一度顔が
+  // フレームから外れるまで次の確定を抑止する。記録・確定後は抑止しない。
   const awaitingFaceExitRef = useRef(false);
   // ポーリング効果を張り直さずに最新のコールバックを呼ぶためのミラー
   const onFaceSeenRef = useRef(onFaceSeen);
@@ -225,16 +227,17 @@ export function useFaceRecognitionLoop({
     enrolledFaces,
     members,
     detectionIntervalMs,
-    stableCount,
+    requiredStreak,
     closeThreshold,
   ]);
 
-  function dismissMatch() {
+  const dismissMatch = useCallback((options?: { requireFaceExit?: boolean }) => {
     missCountRef.current = 0;
-    awaitingFaceExitRef.current = true;
+    awaitingFaceExitRef.current = options?.requireFaceExit ?? true;
+    matchStreakRef.current = null;
     setMatchedMember(null);
     setHint("scanning");
-  }
+  }, []);
 
   return { hint, isInferring, matchedMember, dismissMatch };
 }

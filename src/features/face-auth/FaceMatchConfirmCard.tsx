@@ -18,6 +18,8 @@ interface FaceMatchConfirmCardProps {
   /** ジェスチャーで直接記録が完了したときのステータス(完了表示に切り替える) */
   completedAction: AttendanceStatus | null;
   busy?: boolean;
+  /** ジェスチャー記録の失敗メッセージ(音・ログだけだと無反応に見えるため表示する) */
+  errorMessage?: string | null;
 }
 
 /**
@@ -34,6 +36,7 @@ export function FaceMatchConfirmCard({
   countdown,
   completedAction,
   busy = false,
+  errorMessage = null,
 }: FaceMatchConfirmCardProps) {
   // 確認ダイアログの表示時に確認音を鳴らす(対象メンバーが変わったときも)
   useEffect(() => {
@@ -69,6 +72,15 @@ export function FaceMatchConfirmCard({
               <div className="mt-2">
                 <GestureCountdown countdown={countdown} />
               </div>
+            ) : busy ? (
+              // 送信中(POST)。無言だと「無反応」に見えるため明示する
+              <div
+                role="status"
+                className="mt-6 flex items-center justify-center gap-2 py-4 text-sm text-slate-600 dark:text-slate-300"
+              >
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-500 border-t-transparent" />
+                記録中…
+              </div>
             ) : (
               <>
                 <div className="mt-4 flex gap-3">
@@ -87,6 +99,17 @@ export function FaceMatchConfirmCard({
                     はい
                   </button>
                 </div>
+                {errorMessage && (
+                  <p
+                    role="alert"
+                    className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-left text-xs text-rose-600 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-400"
+                  >
+                    記録に失敗しました: {errorMessage}
+                    <span className="mt-0.5 block text-[10px] text-rose-400 dark:text-rose-300/70">
+                      手を下ろしてから、もう一度ジェスチャーをかざすと再試行できます
+                    </span>
+                  </p>
+                )}
                 <div className="mt-4">
                   <GestureGuide
                     detectedGesture={detectedGesture}

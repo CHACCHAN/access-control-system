@@ -71,9 +71,9 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 | キー | 既定値 | 反映 | 内容 |
 |---|---|---|---|
 | performance.recognitionIntervalMs | 1000 | 即時 | 顔認証の推論間隔(ms) |
-| performance.recognitionStableCount | 1 | 即時 | 顔認証の連続一致回数(確認カード表示まで)。0で無制限(自動確定しない) |
+| performance.recognitionStableCount | 1 | 即時 | 顔認証の連続一致回数(確認カード表示まで)。最小値は1。保存済みの0は1として扱う |
 | performance.gesturePollIntervalMs | 700 | 即時 | ジェスチャー認識の間隔(ms) |
-| performance.gestureStableCount | 2 | 即時 | ジェスチャーの連続一致回数。0で無制限(ジェスチャーでは更新しない) |
+| performance.gestureStableCount | 2 | 即時 | ジェスチャーの連続一致回数。最小値は1。保存済みの0は1として扱う |
 | performance.cameraFrameIntervalMs | 100 | 数秒で反映 | カメラ映像の送信間隔(ms)。100ms=10fps |
 | performance.cameraJpegQuality | 75 | 数秒で反映 | カメラ映像の JPEG 品質(10-100) |
 | performance.matchThreshold | 0.5 | 即時 | 照合閾値(コサイン類似度) |

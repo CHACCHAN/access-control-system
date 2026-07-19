@@ -7,9 +7,10 @@
 # 「ファイルが既に存在する場合はスキップ」する冪等な実装。
 # GitHub へのネットワークアクセスが必要。
 set -e
+cd "${WORKSPACE_DIR}"
 
-MODEL_DIR="src-tauri/resources/models"
-ORT_DIR="src-tauri/resources/onnxruntime"
+MODEL_DIR="${WORKSPACE_DIR}/src-tauri/resources/models"
+ORT_DIR="${WORKSPACE_DIR}/src-tauri/resources/onnxruntime"
 # Rust 側の ort クレート(=2.0.0-rc.12)が対応する ONNX Runtime のバージョン。
 # ort を更新する場合はここも合わせて更新すること。
 ORT_VERSION="1.27.0"

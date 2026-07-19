@@ -26,23 +26,16 @@ git clone https://repository.naka.ai.chibatech.ac.jp/role_laboratory_staff/acces
 cd access-control-system
 ```
 
-### 2. Git の初期設定(各自)
+clone方式(SSH/HTTPS)やGitHubとの併用など、リモートの運用方法は各自の環境に合わせて自由に設定してください。
 
-GitLab は SSO 認証のため、通常のログインパスワードでは Git 操作(clone/push/pull)できません。**Personal Access Token** が必要です。
-
-1. GitLab 右上のアバター → **Edit profile** → **Access Tokens**
-2. スコープに `read_repository`, `write_repository` を選択してトークンを発行
-3. 発行されたトークンは再表示できないため、必ず控えておく
+初回のみ、コミット時の作者情報を設定します。
 
 ```bash
 git config --global user.name "あなたの名前"
 git config --global user.email "あなたのメールアドレス"
-git config --global credential.helper store
 ```
 
-初回 `git push` / `git pull` 時にユーザー名とパスワード(発行したトークン)を求められます。以降は再入力不要です。
-
-### 3. VS Code で Dev Container を開く
+### 2. VS Code で Dev Container を開く
 
 1. VS Code でこのフォルダを開く
 2. 右下に出る通知、またはコマンドパレット(`Ctrl+Shift+P`)から **Dev Containers: Reopen in Container** を実行
@@ -50,16 +43,23 @@ git config --global credential.helper store
 
 コンテナ内には Rust、Bun、Tauri CLI、wasm-pack など開発に必要な一式が揃っています。
 
-初回起動時に `postCreateCommand` で `.devcontainer/setup-models.sh` が実行され、ONNX モデル(InsightFace buffalo_l / OpenCV Zoo)と ONNX Runtime 共有ライブラリ(`libonnxruntime.so`)が `src-tauri/resources/` 以下へダウンロードされます(既に存在する場合はスキップ)。手動で実行する場合:
+`node_modules` / `dist` / `src-tauri/target` は Docker の named volume にマウントされており、ホストとの bind mount より高速に動作します(コンテナを再作成してもキャッシュは保持されます)。
+
+初回起動時、`postCreateCommand` で以下が自動実行されます。
+
+1. `.devcontainer/postCreateCommand.sh` — 上記 named volume の権限調整(`vscode` ユーザーへの chown)と `bun install`
+2. `.devcontainer/setup-models.sh` — ONNX モデル(InsightFace buffalo_l / OpenCV Zoo)と ONNX Runtime 共有ライブラリ(`libonnxruntime.so`)を `src-tauri/resources/` 以下へダウンロード(既に存在する場合はスキップ)
+
+手動で再実行したい場合:
 
 ```bash
+bash .devcontainer/postCreateCommand.sh
 bash .devcontainer/setup-models.sh
 ```
 
-### 4. 開発サーバーの起動
+### 3. 開発サーバーの起動
 
 ```bash
-bun install
 bun run dev
 ```
 
@@ -75,7 +75,7 @@ bun run tauri dev
 
 なお `bun run dev` は Vite と同時に、外部 API への CORS 回避用の中継サーバー(既定: localhost:8787)も起動します。詳細は [docs/api/http-routing.md](docs/api/http-routing.md) を参照してください。
 
-### 5. (任意) Tauri デスクトップアプリとしてビルド確認
+### 4. (任意) Tauri デスクトップアプリとしてビルド確認
 
 ```bash
 cargo tauri build
