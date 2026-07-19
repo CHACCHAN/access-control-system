@@ -36,9 +36,3 @@ src-tauri/target/
 src-tauri/resources/models/
 src-tauri/resources/onnxruntime/
 *onnx
-
-# deb
-.deb
-
-# claude
-.claude

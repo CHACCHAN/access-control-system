@@ -1,0 +1,11 @@
+{
+  "dangerouslySkipPermissions": true,
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "WebFetch(*)"
+    ]
+  }
+}
