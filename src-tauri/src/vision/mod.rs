@@ -106,6 +106,24 @@ pub struct EnrolledFaceInput {
     pub embedding: Vec<f32>,
 }
 
+/// `recognize_face` の呼び出しオプション。画面ごとに「どこまで推論するか」
+/// (照合の有無・ランドマークの要否)と、オーバーレイの描き方が変わるため、
+/// 引数をまとめて受け取る。フロント側の型は
+/// `src/shared/lib/visionApi.ts` の `FaceRecognitionOptions` と対にすること。
+/// 各項目は未指定可で、既定は下の `recognize_face` 内で解決する。
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RecognizeFaceOptions {
+    /// false なら顔検出だけを行い、embedding 抽出と 1:N 照合を省略する
+    match_faces: Option<bool>,
+    /// 検出専用時にも106点ランドマークを取得する(可視化用)か
+    include_landmarks: Option<bool>,
+    /// この顔幅比率未満では照合へ進まない(フロントが結果を使わないため)
+    min_match_face_width_ratio: Option<f32>,
+    /// 照合を省略していても顔枠を「認識成功(緑)」で描くか
+    overlay_recognized: Option<bool>,
+}
+
 impl VisionState {
     fn ensure_face_loaded(&self, app: &AppHandle) -> Result<(), String> {
         if self
@@ -281,23 +299,22 @@ pub async fn recognize_face(
     state: State<'_, VisionState>,
     frame_state: State<'_, SharedFrame>,
     overlay_state: State<'_, OverlayState>,
-    match_faces: Option<bool>,
-    include_landmarks: Option<bool>,
-    min_match_face_width_ratio: Option<f32>,
-    overlay_recognized: Option<bool>,
+    options: Option<RecognizeFaceOptions>,
 ) -> Result<FaceAuthResult, String> {
     let state = state.inner().clone();
     let shared = frame_state.inner().clone();
     let overlay = overlay_state.inner().clone();
+    let options = options.unwrap_or_default();
 
     tauri::async_runtime::spawn_blocking(move || {
         state.ensure_face_loaded(&app)?;
         let perf = crate::settings::load_perf(&app);
-        let match_faces = match_faces.unwrap_or(true);
-        let include_landmarks = include_landmarks.unwrap_or(true);
+        let match_faces = options.match_faces.unwrap_or(true);
+        let include_landmarks = options.include_landmarks.unwrap_or(true);
         // フロントがこの比率未満の結果を採用しない場合、Rust側でも重い後段処理を
         // 省略する。ただし管理者設定の最小値より緩くはしない。
-        let match_face_width_ratio = min_match_face_width_ratio
+        let match_face_width_ratio = options
+            .min_match_face_width_ratio
             .filter(|v| v.is_finite())
             .unwrap_or(perf.min_face_width_ratio)
             .clamp(perf.min_face_width_ratio, 0.9);
@@ -427,7 +444,7 @@ pub async fn recognize_face(
         overlay.set_face(FaceOverlay {
             bbox: best_bbox,
             landmarks,
-            recognized: result.recognized || overlay_recognized.unwrap_or(false),
+            recognized: result.recognized || options.overlay_recognized.unwrap_or(false),
         });
 
         if cfg!(debug_assertions) {

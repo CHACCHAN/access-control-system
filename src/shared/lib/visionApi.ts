@@ -76,9 +76,13 @@ export function setEnrolledFaces(faces: EnrolledFaceInput[]): Promise<number> {
   return invoke("set_enrolled_faces", { faces });
 }
 
-/** 最新のカメラフレームに対する顔検出。必要な画面だけ1:N照合まで行う。 */
+/**
+ * 最新のカメラフレームに対する顔検出。必要な画面だけ1:N照合まで行う。
+ * オプションは Rust 側の `RecognizeFaceOptions`(vision/mod.rs)へ
+ * そのまま渡るため、キー名は両者で揃えること。
+ */
 export function recognizeFace(options: FaceRecognitionOptions): Promise<FaceAuthResult> {
-  return invoke("recognize_face", { ...options });
+  return invoke("recognize_face", { options });
 }
 
 /** 顔登録用: 最新フレームから embedding を1件抽出(顔なし等はエラー) */
