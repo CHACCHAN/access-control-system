@@ -123,6 +123,25 @@ describe("normalizeSettings", () => {
     expect(normalizeSettings({ gestureCountdownSeconds: 2.6 }).gestureCountdownSeconds).toBe(3);
   });
 
+  test("Socket.IOの購読設定は空・不正型なら既定値へ戻す", () => {
+    // 未設定(旧バージョンの保存データ)は既定値で補完される
+    const migrated = normalizeSettings({ wsSignalField: "message", wsSignalValue: "update" });
+    expect(migrated.socketEventName).toBe("statusUpdated");
+    expect(migrated.socketUserField).toBe("userName");
+    expect(migrated.socketStatusField).toBe("newStatus");
+
+    // 空文字・空白のみ・不正型は購読/読み取りができないため既定値へ戻す
+    const settings = normalizeSettings({
+      socketEventName: "  ",
+      socketUserField: 123,
+      socketStatusField: " status ",
+    });
+    expect(settings.socketEventName).toBe("statusUpdated");
+    expect(settings.socketUserField).toBe("userName");
+    // 前後の空白は落として保持する
+    expect(settings.socketStatusField).toBe("status");
+  });
+
   test("不正なenumとパネル背景を既定値へ戻す", () => {
     const settings = normalizeSettings({
       theme: "invalid",

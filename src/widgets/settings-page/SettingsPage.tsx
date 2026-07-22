@@ -88,7 +88,8 @@ function validateSettings(settings: AppSettings): ValidationError | null {
     ["メンバー取得API", settings.getEndpoint, ["http:", "https:"]],
     ["顔登録API", settings.postEndpoint, ["http:", "https:"]],
     ["在室更新API", settings.attendanceEndpoint, ["http:", "https:"]],
-    ["WebSocket", settings.wsEndpoint, ["ws:", "wss:"]],
+    // Socket.IO は http(s) 表記で指定するのが一般的だが、ws(s) 表記でも接続できる
+    ["Socket.IO", settings.wsEndpoint, ["http:", "https:", "ws:", "wss:"]],
   ];
   for (const [label, value, protocols] of endpoints) {
     if (!value) continue;
@@ -210,7 +211,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     let phase: "save" | "restart" = "save";
     try {
       // updateSettings の完了は、デバウンスされたstore.saveまで完了したことを意味する。
-      // 保存された設定は各消費側(API再取得・WebSocket再接続・Rustのstore再読込)が
+      // 保存された設定は各消費側(API再取得・Socket.IO再接続・Rustのstore再読込)が
       // 検知して即時反映するため、通常は再起動しない。
       await updateSettings(draft);
 

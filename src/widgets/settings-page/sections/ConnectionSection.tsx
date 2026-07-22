@@ -36,9 +36,9 @@ const ENDPOINTS: {
   },
   {
     key: "wsEndpoint",
-    label: "WebSocket エンドポイント",
-    hint: "更新シグナルを受け取るリアルタイム接続先",
-    placeholder: "wss://example.com/ws",
+    label: "Socket.IO エンドポイント",
+    hint: "在室状況の更新通知を受け取る Socket.IO サーバー(http/https)",
+    placeholder: "https://example.com",
   },
 ];
 

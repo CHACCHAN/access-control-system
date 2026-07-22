@@ -57,7 +57,12 @@ flowchart TD
   `scripts/dev.ts` が `DEV_PROXY_PORT` をVite公開変数へ引き継ぐため、環境変数で変更しても
   両者は同じ値になる。中継はlocalhostだけで待ち受け、HTTP(S)以外へは転送しない。
 
-## WebSocket
+## Socket.IO(在室状況の更新通知)
 
-WebSocket はブラウザ標準 API のため中継しない。実機・開発時とも設定の
-エンドポイントへ直接接続する。
+socket.io-client はブラウザの WebSocket を使うため中継しない。実機・開発時とも
+設定のエンドポイントへ直接接続する。
+
+**トランスポートは WebSocket に固定**している(`transports: ["websocket"]`)。
+Socket.IO 既定の HTTP ロングポーリングによるハンドシェイクは、実機
+(WebKitGTK + カスタムスキーム)では CORS で拒否されるため。WebSocket の
+アップグレード要求はブラウザの CORS 制約を受けない。

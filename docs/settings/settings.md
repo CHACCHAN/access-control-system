@@ -7,7 +7,7 @@
 - 設定画面は draft(編集バッファ)方式。どのセクションを編集しても、ヘッダーの
   「保存」1つで全設定が保存される。
 - **保存した設定は端末を再起動せずに即時反映される**。エンドポイント・APIトークンは
-  メンバー一覧の自動再取得、WebSocket は再接続、Rust 側が読む項目(camera* /
+  メンバー一覧の自動再取得、Socket.IO は再接続、Rust 側が読む項目(camera* /
   match* / gestureStatusMap)は store の再読込で追従する。
 - 再起動が必要な項目は `src/widgets/settings-page/restartPolicy.ts` に宣言的に
   登録する(**現在は該当なし**)。登録した項目が変更された保存のみ、従来どおり
@@ -92,7 +92,7 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 | getEndpoint | メンバー一覧取得 API(GET) |
 | postEndpoint | 顔特徴ベクトル登録 API(POST {postEndpoint}/{username}) |
 | attendanceEndpoint | 在室状況更新 API(POST) |
-| wsEndpoint | 更新シグナル WebSocket |
+| wsEndpoint | 在室状況の更新通知を受け取る Socket.IO サーバー(http/https) |
 | apiToken | Authorization ヘッダーへそのまま送る値(例: `Bearer xxx`) |
 | externalSites | 外部サイトの一覧(`{ name, url, headers }` の配列、最大12件)。`headers` はページ取得時に付与する任意の HTTP ヘッダー(`{ name, value }` の配列、サイトごとに最大8件。認証トークン等)で、ページ本体の取得とリンク・フォーム遷移に適用される(CSS・画像などのサブリソースはブラウザが直接読むため対象外)。トップ画面の地球儀ボタンからアプリ内のフルスクリーンページとして開く。複数登録すると一覧から選択、1件なら直接開く。iframe 直接読み込みではなく、**他の API と同じ通信経路(開発時=中継サーバ / 実機=Rust reqwest)で HTML を取得して描画**するため、X-Frame-Options 等の埋め込み拒否の影響を受けない。サイト側の JavaScript は実行しない(サーバーレンダリングのサイト向け)。旧設定 `portalUrl`(単一URL)は読み込み時に1件目として自動移行される → [ui/screens.md](../ui/screens.md) |
 
@@ -102,7 +102,14 @@ Rust 側は不正値を安全な範囲にクランプし、未設定なら既定
 |---|---|
 | descriptorBodyTemplate | `{"descriptor": "{{descriptor}}"}` |
 | attendanceBodyTemplate | `{"userName": "{{username}}", "name": "{{name}}", "newStatus": "{{status}}"}` |
-| wsSignalField / wsSignalValue | `message` / `update` |
+| socketEventName | `statusUpdated` |
+| socketUserField | `userName` |
+| socketStatusField | `newStatus` |
+
+`socketEventName` は購読する Socket.IO のイベント名、`socketUserField` /
+`socketStatusField` はそのペイロードから読み取るフィールド名
+(→ [api/external-api.md](../api/external-api.md))。いずれも空にすると
+既定値へ戻る(空だと購読・読み取りができないため)。
 
 ### ジェスチャー(GESTURE)
 

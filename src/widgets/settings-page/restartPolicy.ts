@@ -15,7 +15,7 @@ export interface RestartRequiredItem {
  * 再起動が必要な設定項目の一覧。**現在は空 = 全設定が保存だけで反映される。**
  *
  * - エンドポイント・APIトークン → MemberContext が変更を検知して自動再取得
- * - WebSocket 接続先 → useKioskSocket が接続し直す
+ * - Socket.IO 接続先 → useKioskSocket が接続し直す
  * - performance.camera* → キャプチャスレッドが2秒間隔で設定を読み直す
  * - 照合パラメータ・gestureStatusMap → Rust 側が推論のたびに store を読む
  * - スケジュール・消灯・デザイン・外部サイト → React が settings の変更で再適用

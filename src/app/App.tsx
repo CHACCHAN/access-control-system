@@ -60,7 +60,7 @@ function currentHHMM(): string {
 function MainScreen() {
   const { visionError } = useFaceAuth();
   const { settings, isLoading: isSettingsLoading } = useSettings();
-  const { refetch } = useMembers();
+  const { refetch, applyRemoteStatus } = useMembers();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isExternalSiteOpen, setIsExternalSiteOpen] = useState(false);
   const [isScreenDimmed, setIsScreenDimmed] = useState(false);
@@ -74,7 +74,16 @@ function MainScreen() {
     `${new Date().toDateString()}_${currentHHMM()}`,
   );
 
-  useKioskSocket(settings.wsEndpoint, refetch, settings.wsSignalField, settings.wsSignalValue);
+  // 在室状況の更新通知(Socket.IO)。対象メンバーだけを即時反映し、
+  // ペイロードを解釈できない場合のみ一覧を取り直す。
+  useKioskSocket({
+    endpoint: settings.wsEndpoint,
+    eventName: settings.socketEventName,
+    userField: settings.socketUserField,
+    statusField: settings.socketStatusField,
+    onStatusUpdate: applyRemoteStatus,
+    onFallback: refetch,
+  });
 
   // 人物不在時の減光(自動消灯とは別の第1段階)。顔検出(下の onFaceSeen)と
   // 操作が両方途切れると半減光する。設定画面・外部サイト・完全消灯中は判定しない

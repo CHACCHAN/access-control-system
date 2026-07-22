@@ -28,7 +28,7 @@ function formatTime(timestamp: number): string {
 }
 
 /**
- * アプリ全体のイベントログ(通信系・console出力・WebSocketシグナル等)を
+ * アプリ全体のイベントログ(通信系・console出力・更新通知等)を
  * ターミナル風に表示するセクション。ログはメモリ上のみで保持され、
  * アプリ再起動でリセットされる。
  */

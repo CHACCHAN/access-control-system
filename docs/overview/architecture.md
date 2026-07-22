@@ -48,7 +48,7 @@ flowchart LR
   ui -- "invoke(recognize_face / detect_gesture 等)" --> vision
   vision -- "結果(JSON)" --> ui
   ui -- "invoke(play_ui_sound)" --> audio
-  ui -- "HTTP / WebSocket" --> server
+  ui -- "HTTP / Socket.IO" --> server
   settings_rs -.-> cam
   settings_rs -.-> vision
 ```

@@ -21,7 +21,12 @@ interface MemberContextValue {
   clearSelection: () => void;
   clearSelectionIf: (username: string) => void;
   updateStatus: (username: string, status: AttendanceStatus) => void;
-  refetch: () => void;
+  /**
+   * 外部通知(Socket.IO)で受け取ったステータスを一覧へ反映する。
+   * 対象が一覧に無い場合は一覧自体が古いとみなして再取得する。
+   */
+  applyRemoteStatus: (username: string, status: AttendanceStatus) => void;
+  refetch: () => Promise<void>;
 }
 
 const MemberContext = createContext<MemberContextValue | null>(null);
@@ -44,14 +49,14 @@ export function MemberProvider({ children }: { children: ReactNode }) {
   const queuedRefetchRef = useRef(false);
   const localStatusRevisionRef = useRef(0);
 
-  // showSpinner: 初回読み込みだけスケルトン表示にし、WebSocket 更新シグナルなど
+  // showSpinner: 初回読み込みだけスケルトン表示にし、更新通知(Socket.IO)など
   // による裏側での再取得ではメンバー一覧がちらつかないようにする
   const loadMembers = useCallback(
     (showSpinner: boolean) => {
       const requestKey = `${settings.getEndpoint}\0${settings.apiToken}`;
       const inFlight = requestRef.current;
       if (inFlight?.key === requestKey) {
-        // WebSocket通知のburstで通信を中断し続けない。処理中はdirtyだけを立て、
+        // 更新通知のburstで通信を中断し続けない。処理中はdirtyだけを立て、
         // 完了後に高々1回の追従取得へまとめる。
         queuedRefetchRef.current = true;
         return inFlight.promise;
@@ -98,9 +103,8 @@ export function MemberProvider({ children }: { children: ReactNode }) {
     [settings.getEndpoint, settings.apiToken],
   );
 
-  const refetch = useCallback(() => {
-    void loadMembers(false);
-  }, [loadMembers]);
+  // 手動更新ボタンが完了を待って表示を戻せるよう、取得の Promise を返す
+  const refetch = useCallback(() => loadMembers(false), [loadMembers]);
 
   useEffect(() => {
     // 設定(取得先エンドポイント)の読み込みが終わるまでは問い合わせない
@@ -141,6 +145,18 @@ export function MemberProvider({ children }: { children: ReactNode }) {
     setMembers((prev) => prev.map((m) => (m.username === username ? { ...m, status } : m)));
   }, []);
 
+  const applyRemoteStatus = useCallback(
+    (username: string, status: AttendanceStatus) => {
+      // 通知されたメンバーを一覧に持っていない = 一覧が古い。取り直す。
+      if (!members.some((m) => m.username === username)) {
+        void loadMembers(false);
+        return;
+      }
+      updateStatus(username, status);
+    },
+    [members, loadMembers, updateStatus],
+  );
+
   const value = useMemo<MemberContextValue>(
     () => ({
       members,
@@ -151,6 +167,7 @@ export function MemberProvider({ children }: { children: ReactNode }) {
       clearSelection,
       clearSelectionIf,
       updateStatus,
+      applyRemoteStatus,
       refetch,
     }),
     [
@@ -162,6 +179,7 @@ export function MemberProvider({ children }: { children: ReactNode }) {
       clearSelection,
       clearSelectionIf,
       updateStatus,
+      applyRemoteStatus,
       refetch,
     ],
   );

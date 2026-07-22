@@ -10,7 +10,7 @@ interface SectionProps {
 }
 
 /**
- * 各APIリクエストのボディ・WebSocketシグナルの照合条件を編集するセクション。
+ * 各APIリクエストのボディ・Socket.IO 更新通知の読み取り方を編集するセクション。
  * バックエンド側のフィールド名が変わっても、アプリを再ビルドせずここで
  * テンプレートを書き換えるだけで追従できるようにするための設定。
  */
@@ -24,7 +24,7 @@ export function ApiBodySection({ draft, setDraft }: SectionProps) {
         icon={BracesIcon}
         eyebrow="REQUEST BODY"
         title="APIボディ"
-        description="送信するJSONのテンプレートと更新シグナルの照合条件"
+        description="送信するJSONのテンプレートと、更新通知の読み取り方"
       />
 
       <div className="space-y-6">
@@ -82,29 +82,42 @@ export function ApiBodySection({ draft, setDraft }: SectionProps) {
 
         <div className="border-t border-dashed border-slate-200 pt-5 dark:border-white/10">
           <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
-            WebSocketシグナル
+            Socket.IO 更新通知
           </p>
           <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
-            受信メッセージのこのフィールドがこの値のとき「更新あり」とみなします
+            このイベント名で受信したペイロードから、ユーザー名と在室ステータスを読み取って一覧へ即時反映します(読み取れない場合は一覧を再取得します)
           </p>
-          <div className="mt-2 grid grid-cols-2 gap-3">
-            <Field label="フィールド名" htmlFor="ws-signal-field">
+          <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field label="イベント名" htmlFor="socket-event-name">
               <input
-                id="ws-signal-field"
+                id="socket-event-name"
                 type="text"
-                value={draft.wsSignalField}
-                onChange={(e) => setDraft((d) => ({ ...d, wsSignalField: e.target.value }))}
-                placeholder="message"
+                value={draft.socketEventName}
+                onChange={(e) => setDraft((d) => ({ ...d, socketEventName: e.target.value }))}
+                placeholder="statusUpdated"
+                spellCheck={false}
                 className={`${INPUT_CLASS} font-mono`}
               />
             </Field>
-            <Field label="値" htmlFor="ws-signal-value">
+            <Field label="ユーザー名フィールド" htmlFor="socket-user-field">
               <input
-                id="ws-signal-value"
+                id="socket-user-field"
                 type="text"
-                value={draft.wsSignalValue}
-                onChange={(e) => setDraft((d) => ({ ...d, wsSignalValue: e.target.value }))}
-                placeholder="update"
+                value={draft.socketUserField}
+                onChange={(e) => setDraft((d) => ({ ...d, socketUserField: e.target.value }))}
+                placeholder="userName"
+                spellCheck={false}
+                className={`${INPUT_CLASS} font-mono`}
+              />
+            </Field>
+            <Field label="ステータスフィールド" htmlFor="socket-status-field">
+              <input
+                id="socket-status-field"
+                type="text"
+                value={draft.socketStatusField}
+                onChange={(e) => setDraft((d) => ({ ...d, socketStatusField: e.target.value }))}
+                placeholder="newStatus"
+                spellCheck={false}
                 className={`${INPUT_CLASS} font-mono`}
               />
             </Field>

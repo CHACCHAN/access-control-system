@@ -219,14 +219,17 @@ export interface AppSettings {
   postEndpoint: string;
   // 在室状況更新 API(POST {attendanceEndpoint})。descriptor 登録とは別のエンドポイント。
   attendanceEndpoint: string;
+  // Socket.IO サーバーの URL(在室状況の更新通知を受け取る)
   wsEndpoint: string;
   apiToken: string;
   descriptorBodyTemplate: string;
   attendanceBodyTemplate: string;
-  // WebSocket で届くシグナルのうち、どのフィールドがどの値になっていれば
-  // 「更新あり」とみなすか({ message: "update" } 以外の形式にも追従できるように)。
-  wsSignalField: string;
-  wsSignalValue: string;
+  // Socket.IO で受け取る更新通知の形。イベント名と、ペイロード中の
+  // ユーザー名・在室ステータスのフィールド名を設定で変えられるようにして、
+  // サーバー実装が変わっても再ビルドせずに追従できるようにする。
+  socketEventName: string;
+  socketUserField: string;
+  socketStatusField: string;
   // ジェスチャー認識(Rust側)の結果を在室ステータスへ変換するマッピング
   gestureStatusMap: GestureStatusMap;
   // 確認カードで「ちがう」を意味するジェスチャー("" は無効)
@@ -256,8 +259,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   apiToken: "",
   descriptorBodyTemplate: DEFAULT_DESCRIPTOR_BODY_TEMPLATE,
   attendanceBodyTemplate: DEFAULT_ATTENDANCE_BODY_TEMPLATE,
-  wsSignalField: "message",
-  wsSignalValue: "update",
+  socketEventName: "statusUpdated",
+  socketUserField: "userName",
+  socketStatusField: "newStatus",
   gestureStatusMap: DEFAULT_GESTURE_STATUS_MAP,
   rejectGesture: DEFAULT_REJECT_GESTURE,
   gestureCountdownSeconds: GESTURE_COUNTDOWN_DEFAULT,
@@ -329,6 +333,9 @@ export function normalizeSettings(value: unknown): AppSettings {
       : {};
   const stringValue = (candidate: unknown, fallback: string) =>
     typeof candidate === "string" ? candidate : fallback;
+  // 空文字だと機能しない項目(イベント名・フィールド名)は既定値へ戻す
+  const nonEmptyString = (candidate: unknown, fallback: string) =>
+    typeof candidate === "string" && candidate.trim() !== "" ? candidate.trim() : fallback;
   const statusValue = (candidate: unknown, fallback: string) =>
     candidate === "" || candidate === "在室" || candidate === "外出" || candidate === "帰宅"
       ? candidate
@@ -387,8 +394,13 @@ export function normalizeSettings(value: unknown): AppSettings {
       stored.attendanceBodyTemplate,
       DEFAULT_ATTENDANCE_BODY_TEMPLATE,
     ),
-    wsSignalField: stringValue(stored.wsSignalField, DEFAULT_SETTINGS.wsSignalField),
-    wsSignalValue: stringValue(stored.wsSignalValue, DEFAULT_SETTINGS.wsSignalValue),
+    // 空文字だと購読できない/読み取れないため、未設定・空は既定値へ戻す
+    socketEventName: nonEmptyString(stored.socketEventName, DEFAULT_SETTINGS.socketEventName),
+    socketUserField: nonEmptyString(stored.socketUserField, DEFAULT_SETTINGS.socketUserField),
+    socketStatusField: nonEmptyString(
+      stored.socketStatusField,
+      DEFAULT_SETTINGS.socketStatusField,
+    ),
     gestureStatusMap: {
       rock: statusValue(gesture.rock, DEFAULT_GESTURE_STATUS_MAP.rock),
       scissors: statusValue(gesture.scissors, DEFAULT_GESTURE_STATUS_MAP.scissors),

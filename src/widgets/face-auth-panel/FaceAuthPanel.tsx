@@ -3,6 +3,7 @@ import type { AttendanceStatus } from "@/entities/member/model";
 import { useMembers } from "@/entities/member/MemberContext";
 import { useFaceAuth } from "@/features/face-auth/FaceAuthContext";
 import { CameraFeed } from "@/shared/ui/CameraFeed";
+import { IconButton } from "@/shared/ui/IconButton";
 import { ThemeToggleButton } from "@/shared/ui/ThemeToggleButton";
 import { FaceMatchConfirmCard } from "@/features/face-auth/FaceMatchConfirmCard";
 import {
@@ -12,7 +13,7 @@ import {
 import { useGestureStatusLoop } from "@/features/gesture/useGestureStatusLoop";
 import { postAttendance } from "@/entities/member/attendanceApi";
 import { playUiSound } from "@/shared/lib/uiSound";
-import { ArrowUpIcon, GearIcon, GlobeIcon, ScanFaceIcon } from "@/shared/ui/icons";
+import { ArrowUpIcon, GearIcon, GlobeIcon, RestartIcon, ScanFaceIcon } from "@/shared/ui/icons";
 import { isAnimatedPattern, PATTERN_CLASS, useSettings } from "@/shared/hooks/useSettings";
 import type { AuthMode } from "@/features/face-auth/model";
 
@@ -47,7 +48,10 @@ export function FaceAuthPanel({
   // アニメーション付き背景(回路/信号)はこのパネルの背景にのみ描画する
   const pattern = settings.appearance.backgroundPattern;
   const animatedPatternClass = isAnimatedPattern(pattern) ? PATTERN_CLASS[pattern] : "";
-  const { members, activeMember, selectMember, updateStatus } = useMembers();
+  const { members, activeMember, selectMember, updateStatus, refetch } = useMembers();
+  // 更新通知(Socket.IO)が届かない場合の予備手段として、在室状況を手動で取り直す。
+  // 取得完了までアイコンを回してフィードバックする。
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const {
     mediaRef,
     mediaKind,
@@ -67,6 +71,16 @@ export function FaceAuthPanel({
     enableMatch: mode === "recognize",
     onFaceSeen,
   });
+
+  async function handleRefresh() {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
 
   function handleConfirmMatch() {
     if (!matchedMember) return;
@@ -185,20 +199,19 @@ export function FaceAuthPanel({
             {mode === "register" ? "認証に戻る" : "顔を登録する"}
           </button>
           <ThemeToggleButton />
-          <button
-            onClick={onOpenExternalSite}
-            aria-label="外部サイトを開く"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-cyan-400/50 hover:text-cyan-600 dark:border-white/10 dark:bg-slate-800/60 dark:text-slate-200 dark:shadow-none dark:hover:border-cyan-400/50 dark:hover:text-cyan-300"
+          <IconButton
+            label="在室状況を更新"
+            onClick={() => void handleRefresh()}
+            disabled={isRefreshing}
           >
+            <RestartIcon className={`h-4.5 w-4.5 ${isRefreshing ? "animate-spin" : ""}`} />
+          </IconButton>
+          <IconButton label="外部サイトを開く" onClick={onOpenExternalSite}>
             <GlobeIcon className="h-4.5 w-4.5" />
-          </button>
-          <button
-            onClick={onOpenSettings}
-            aria-label="設定を開く"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-cyan-400/50 hover:text-cyan-600 dark:border-white/10 dark:bg-slate-800/60 dark:text-slate-200 dark:shadow-none dark:hover:border-cyan-400/50 dark:hover:text-cyan-300"
-          >
+          </IconButton>
+          <IconButton label="設定を開く" onClick={onOpenSettings}>
             <GearIcon className="h-4.5 w-4.5" />
-          </button>
+          </IconButton>
         </div>
       </header>
 
